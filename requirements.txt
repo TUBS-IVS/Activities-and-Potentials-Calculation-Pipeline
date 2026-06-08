@@ -1,0 +1,25 @@
+# Python packages — install with: pip install -r requirements.txt
+geopandas>=0.14
+pandas>=2.0
+numpy>=1.24
+shapely>=2.0
+fiona>=1.9
+pyproj>=3.5
+pyrosm>=0.6
+requests>=2.31
+python-dotenv>=1.0
+openpyxl>=3.1
+scipy>=1.11
+scikit-learn>=1.3
+tqdm>=4.66
+joblib>=1.3
+folium>=0.14
+mapclassify>=2.6
+osmium>=3.7
+pytest>=7.4
+
+# NOTE — system dependency for notebook 02 (OSM PBF clipping):
+# The osmium Python package above is NOT the same as the osmium-tool CLI.
+# Notebook 02 calls `osmium extract` via subprocess — install the CLI separately:
+#   Linux:  sudo apt install osmium-tool
+#   Mac:    brew install osmium-tool
