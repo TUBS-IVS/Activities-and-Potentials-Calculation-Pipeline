@@ -1,6 +1,6 @@
 # Building-Level Activity Capacity Pipeline
 
-A geospatial pipeline that disaggregates zone-level travel demand — workers, school pupils, shoppers, leisure trips — down to individual buildings. It combines official 3D building footprints (ALKIS), OpenStreetMap, and an LLM classifier to produce a building-level capacity dataset ready for transport or land-use modelling.
+A geospatial pipeline that disaggregates zone-level travel demand workers, school pupils, shoppers, leisure trips down to individual buildings. It combines official 3D building footprints (ALKIS), OpenStreetMap, and an LLM classifier to produce a building-level capacity dataset ready for transport or land-use modelling.
 
 Developed at the Institute for Transportation and Urban Engineering, TU Braunschweig, as part of a research project on activity-based demand modelling. The pipeline is generic: all region-specific settings live in a single `config.py` file.
 
@@ -8,7 +8,7 @@ Developed at the Institute for Transportation and Urban Engineering, TU Braunsch
 
 ## The Problem It Solves
 
-Transport models typically work at zone level — a zone has *5,000 workers*, but not *which buildings those workers are in*. Redistributing demand to buildings requires knowing what activity each building hosts and how much capacity it has. Manually classifying hundreds of thousands of buildings is infeasible; coarse ALKIS codes are often too ambiguous.
+Transport models typically work at zone level a zone has *5,000 workers*, but not *which buildings those workers are in*. Redistributing demand to buildings requires knowing what activity each building hosts and how much capacity it has. Manually classifying hundreds of thousands of buildings is infeasible; coarse ALKIS codes are often too ambiguous.
 
 This pipeline solves it by:
 1. Enriching each building with OSM points-of-interest, landuse, and ALKIS metadata
@@ -147,16 +147,7 @@ Key settings to review for a new region:
 ```python
 TARGET_CRS = "EPSG:25832"          # UTM Zone 32N — change for your region
 
-# Map your zone file's column names to the 7 pipeline activity types
-ZONE_COLUMN_MAP = {
-    "Workers":          "SG_3_BE~17",
-    "School":           ["SG_4_BS", "SG_4_GSCH", "SG_4_WFSCH"],
-    "University":       "SG_4_HS",
-    "Kindergarten":     "SG_4_KITA",
-    "Retail_Daily":     "SG_5_EK_TB",
-    "Retail_Non-Daily": "SG_5_EK~19",
-    "Leisure":          "SG_6_FR~23",
-}
+# Map your zone file's column names to the 7 pipeline activity types ("Workers", "School", "University", "Kindergarten", "Retail_Daily", "Retail_Non-Daily", "Leisure")
 
 MIN_BUILDING_VOLUME_M3  = 1        # minimum volume to keep (step 01)
 MIN_CONDENSED_VOLUME_M3 = 30       # minimum volume before LLM input (step 05)
