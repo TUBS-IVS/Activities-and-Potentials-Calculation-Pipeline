@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+type: software
+title: "Building-Level Activity Capacity Pipeline"
+abstract: >
+  A transferable, open-source pipeline that derives building-level activity types
+  and geometry-based potentials by combining ALKIS 3D cadastral data, OpenStreetMap,
+  and a large language model classifier. Zone-level activity totals are redistributed
+  to individual buildings using activity-informed, geometry-aware weights.
+authors:
+  - family-names: Patel
+    given-names: Mayur
+    email: m.patel@tu-braunschweig.de
+    affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
+    orcid: ""
+  - family-names: Bienzeisler
+    given-names: Lasse
+    affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
+  - family-names: Friedrich
+    given-names: Bernhard
+    affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
+repository-code: "https://github.com/your-org/capacity-calculation-pipeline"
+version: "1.0.0"
+date-released: "2026-06-08"
+keywords:
+  - building activity classification
+  - activity potential estimation
+  - large language models
+  - geospatial
+  - OpenStreetMap
+  - ALKIS
+  - agent-based modelling
+  - travel demand modelling
+  - disaggregation
+preferred-citation:
+  type: unpublished
+  title: "Deriving Activities and Their Potentials at Building-Level Using Large Language Models"
+  authors:
+    - family-names: Patel
+      given-names: Mayur
+    - family-names: Bienzeisler
+      given-names: Lasse
+    - family-names: Friedrich
+      given-names: Bernhard
+  notes: >
+    Preprint. Submitted to Transportation Research Procedia,
+    Euro Working Group on Transportation Annual Meeting 2026 (EWGT2026).
+  year: 2026

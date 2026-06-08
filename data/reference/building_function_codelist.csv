@@ -1,0 +1,302 @@
+﻿function,label_de,label_en
+31001_1000,Wohngebäude,residential buildings
+31001_1010,Wohnhaus,residential building
+31001_1020,Wohnheim,Dorm
+31001_1021,Kinderheim,Children's home
+31001_1022,Seniorenheim,retirement home
+31001_1023,Schwesternwohnheim,Nurses' dormitory
+31001_1024,"Studenten-, Schülerwohnheim",Student and student dormitory
+31001_1025,Schullandheim,School camp
+31001_1100,Gemischt genutztes Gebäude mit Wohnen,Mixed-use building with residential
+31001_1110,Wohngebäude mit Gemeinbedarf,Residential buildings with common needs
+31001_1120,Wohngebäude mit Handel und Dienstleistungen,Residential buildings with trade and services
+31001_1121,Wohn- und Verwaltungsgebäude,Residential and administrative buildings
+31001_1122,Wohn- und Bürogebäude,Residential and office buildings
+31001_1123,Wohn- und Geschäftsgebäude,Residential and commercial buildings
+31001_1130,Wohngebäude mit Gewerbe und Industrie,Residential buildings with commercial and industrial properties
+31001_1131,Wohn- und Betriebsgebäude,Residential and commercial buildings
+31001_1210,Land- und forstwirtschaftliches Wohngebäude,Agricultural and forestry residential building
+31001_1220,Land- und forstwirtschaftliches Wohn- und Betriebsgebäude,Agricultural and forestry residential and operational buildings
+31001_1221,Bauernhaus,Farmhouse
+31001_1222,Wohn- und Wirtschaftsgebäude,Residential and commercial buildings
+31001_1223,Forsthaus,Forester's house
+31001_1310,Gebäude zur Freizeitgestaltung,Leisure building
+31001_1311,Ferienhaus,Holiday home
+31001_1312,Wochenendhaus,weekend house
+31001_1313,Gartenhaus,Garden house
+31001_2000,Gebäude für Wirtschaft oder Gewerbe,Buildings for business or commerce
+31001_2010,Gebäude für Handel und Dienstleistungen,Buildings for trade and services
+31001_2020,Bürogebäude,Office building
+31001_2030,Kreditinstitut,Credit institution
+31001_2040,Versicherung,Insurance
+31001_2050,Geschäftsgebäude,Commercial building
+31001_2051,Kaufhaus,department store
+31001_2052,Einkaufszentrum,Shopping center
+31001_2053,Markthalle,Market hall
+31001_2054,Laden,Load
+31001_2055,Kiosk,kiosk
+31001_2056,Apotheke,Pharmacy
+31001_2060,Messehalle,Exhibition hall
+31001_2070,Gebäude für Beherbergung,Building for accommodation
+31001_2071,"Hotel, Motel, Pension","Hotel, motel, guesthouse"
+31001_2072,Jugendherberge,youth hostel
+31001_2073,Hütte (mit Übernachtungsmöglichkeit),Hut (with overnight accommodation)
+31001_2074,Campingplatzgebäude,Campsite building
+31001_2080,Gebäude für Bewirtung,Hospitality building
+31001_2081,"Gaststätte, Restaurant","Restaurant, restaurant"
+31001_2082,Hütte (ohne Übernachtungsmöglichkeit),Hut (without overnight accommodation)
+31001_2083,Kantine,canteen
+31001_2090,Freizeit- und Vergnügungsstätte,Leisure and entertainment venue
+31001_2091,Festsaal,Banquet hall
+31001_2092,Kino,cinema
+31001_2093,"Kegel-, Bowlinghalle",Skittles and bowling hall
+31001_2094,Spielkasino,Casino
+31001_2095,Spielhalle,arcade
+31001_2100,Gebäude für Gewerbe und Industrie,Commercial and industrial buildings
+31001_2110,Produktionsgebäude,Production building
+31001_2111,Fabrik,Factory
+31001_2112,Betriebsgebäude,Company building
+31001_2113,Brauerei,brewery
+31001_2114,Brennerei,distillery
+31001_2120,Werkstatt,Workshop
+31001_2121,Sägewerk,sawmill
+31001_2130,Tankstelle,Gas station
+31001_2131,"Waschstraße, Waschanlage, Waschhalle","Car wash, car wash, car wash hall"
+31001_2140,Gebäude für Vorratshaltung,Building for storage
+31001_2141,Kühlhaus,cold storage
+31001_2142,Speichergebäude,Storage building
+31001_2143,"Lagerhalle, Lagerschuppen, Lagerhaus","Warehouse, storage shed, warehouse"
+31001_2150,Speditionsgebäude,Shipping company building
+31001_2160,Gebäude für Forschungszwecke,Building for research purposes
+31001_2170,Gebäude für Grundstoffgewinnung,Building for raw materials extraction
+31001_2171,Bergwerk,mine
+31001_2172,Saline,Saline
+31001_2180,Gebäude für betriebliche Sozialeinrichtung,Building for company social facilities
+31001_2200,Sonstiges Gebäude für Gewerbe und Industrie,Other buildings for commercial and industrial purposes
+31001_2210,Mühle,mill
+31001_2211,Windmühle,Windmill
+31001_2212,Wassermühle,Water mill
+31001_2213,Schöpfwerk,Creation
+31001_2220,Wetterstation,Weather station
+31001_2310,Gebäude für Handel und Dienstleistung mit Wohnen,Building for trade and services with housing
+31001_2320,Gebäude für Gewerbe und Industrie mit Wohnen,Commercial and industrial buildings with residential areas
+31001_2400,Betriebsgebäude zu Verkehrsanlagen (allgemein),Operational buildings for traffic facilities (general)
+31001_2410,Betriebsgebäude für Straßenverkehr,Operational building for road traffic
+31001_2411,Straßenmeisterei,Road maintenance department
+31001_2412,Wartehalle,Waiting hall
+31001_2420,Betriebsgebäude für Schienenverkehr,Railway operations building
+31001_2421,Bahnwärterhaus,Railway keeper's house
+31001_2422,"Lokschuppen, Wagenhalle","Engine shed, wagon hall"
+31001_2423,"Stellwerk, Blockstelle","Signal box, block point"
+31001_2424,Betriebsgebäude des Güterbahnhofs,Freight station operations building
+31001_2430,Betriebsgebäude für Flugverkehr,Air traffic operations building
+31001_2431,Flugzeughalle,Airplane hangar
+31001_2440,Betriebsgebäude für Schiffsverkehr,Operational building for shipping traffic
+31001_2441,Werft (Halle),Shipyard (hall)
+31001_2442,Dock (Halle),Dock (hall)
+31001_2443,Betriebsgebäude zur Schleuse,Operating building to the lock
+31001_2444,Bootshaus,Boathouse
+31001_2450,Betriebsgebäude zur Seilbahn,Operating building for the cable car
+31001_2451,Spannwerk zur Drahtseilbahn,Tensioning system for the cable car
+31001_2460,Gebäude zum Parken,Building for parking
+31001_2461,Parkhaus,Parking garage
+31001_2462,Parkdeck,Parking deck
+31001_2463,Garage,garage
+31001_2464,Fahrzeughalle,Vehicle hall
+31001_2500,Gebäude zur Versorgung,Buildings for supply
+31001_2501,Gebäude zur Energieversorgung,Energy supply buildings
+31001_2510,Gebäude zur Wasserversorgung,Water supply building
+31001_2511,Wasserwerk,Waterworks
+31001_2512,Pumpstation,Pumping station
+31001_2513,Wasserbehälter,Water container
+31001_2520,Gebäude zur Elektrizitätsversorgung,Electricity supply building
+31001_2521,Elektrizitätswerk,Electricity plant
+31001_2522,Umspannwerk,substation
+31001_2523,Umformer,converter
+31001_2527,Reaktorgebäude,Reactor building
+31001_2528,Turbinenhaus,Turbine house
+31001_2529,Kesselhaus,Boiler house
+31001_2540,Gebäude für Fernmeldewesen,Telecommunications building
+31001_2560,Gebäude an unterirdischen Leitungen,Buildings on underground pipes
+31001_2570,Gebäude zur Gasversorgung,Gas supply building
+31001_2571,Gaswerk,Gasworks
+31001_2580,Heizwerk,Heating plant
+31001_2590,Gebäude zur Versorgungsanlage,Utility building
+31001_2591,Pumpwerk (nicht für Wasserversorgung),Pumping station (not for water supply)
+31001_2600,Gebäude zur Entsorgung,Building for disposal
+31001_2610,Gebäude zur Abwasserbeseitigung,Wastewater disposal building
+31001_2611,Gebäude der Kläranlage,Wastewater treatment plant building
+31001_2612,Toilette,toilet
+31001_2620,Gebäude zur Abfallbehandlung,Waste treatment building
+31001_2621,Müllbunker,Garbage bunker
+31001_2622,Gebäude zur Müllverbrennung,Waste incineration building
+31001_2623,Gebäude der Abfalldeponie,Landfill building
+31001_2700,Gebäude für Land- und Forstwirtschaft,Agriculture and forestry buildings
+31001_2720,Land- und forstwirtschaftliches Betriebsgebäude,Agricultural and forestry business building
+31001_2721,Scheune,barn
+31001_2723,Schuppen,Shed
+31001_2724,Stall,stall
+31001_2726,Scheune und Stall,Barn and stable
+31001_2727,Stall für Tiergroßhaltung,Stable for keeping large animals
+31001_2728,Reithalle,Riding hall
+31001_2729,Wirtschaftsgebäude,Farm buildings
+31001_2732,Almhütte,Alpine hut
+31001_2735,"Jagdhaus, Jagdhütte","Hunting lodge, hunting lodge"
+31001_2740,"Treibhaus, Gewächshaus","greenhouse, greenhouse"
+31001_2741,Treibhaus,greenhouse
+31001_2742,"Gewächshaus, verschiebbar","Greenhouse, movable"
+31001_3000,Gebäude für öffentliche Zwecke,Buildings for public purposes
+31001_3010,Verwaltungsgebäude,Administration building
+31001_3011,Parlament,parliament
+31001_3012,Rathaus,City hall
+31001_3013,Post,post
+31001_3014,Zollamt,customs office
+31001_3015,Gericht,Court
+31001_3016,"Botschaft, Konsulat","Embassy, ​​consulate"
+31001_3017,Kreisverwaltung,District administration
+31001_3018,Bezirksregierung,District government
+31001_3019,Finanzamt,tax office
+31001_3020,Gebäude für Bildung und Forschung,Building for education and research
+31001_3021,Allgemein bildende Schule,General education school
+31001_3022,Berufsbildende Schule,Vocational school
+31001_3023,"Hochschulgebäude (Fachhochschule, Universität)","University building (technical college, university)"
+31001_3024,Forschungsinstitut,Research institute
+31001_3030,Gebäude für kulturelle Zwecke,Buildings for cultural purposes
+31001_3031,Schloss,Lock
+31001_3032,"Theater, Oper","Theater, opera"
+31001_3033,Konzertgebäude,Concert building
+31001_3034,Museum,museum
+31001_3035,"Rundfunk, Fernsehen","Radio, television"
+31001_3036,Veranstaltungsgebäude,Event building
+31001_3037,"Bibliothek, Bücherei","library, library"
+31001_3038,"Burg, Festung","Castle, fortress"
+31001_3040,Gebäude für religiöse Zwecke,Buildings for religious purposes
+31001_3041,Kirche,Church
+31001_3042,Synagoge,synagogue
+31001_3043,Kapelle,chapel
+31001_3044,Gemeindehaus,Community hall
+31001_3045,Gotteshaus,House of God
+31001_3046,Moschee,mosque
+31001_3047,Tempel,temple
+31001_3048,Kloster,monastery
+31001_3050,Gebäude für Gesundheitswesen,Healthcare building
+31001_3051,Krankenhaus,hospital
+31001_3052,"Heilanstalt, Pflegeanstalt, Pflegestation","Sanatorium, nursing home, nursing station"
+31001_3053,"Ärztehaus, Poliklinik","Medical center, polyclinic"
+31001_3054,Rettungswache,Lifeguard station
+31001_3060,Gebäude für soziale Zwecke,Buildings for social purposes
+31001_3061,Jugendfreizeitheim,Youth leisure home
+31001_3062,"Freizeit-, Vereinsheim, Dorfgemeinschafts-, Bürgerhaus","Leisure center, clubhouse, village community center, community center"
+31001_3063,Seniorenfreizeitstätte,Senior leisure center
+31001_3064,Obdachlosenheim,homeless shelter
+31001_3065,"Kinderkrippe, Kindergarten, Kindertagesstätte","Nursery, kindergarten, daycare center"
+31001_3066,Asylbewerberheim,Asylum seekers' home
+31001_3070,Gebäude für Sicherheit und Ordnung,Buildings for security and order
+31001_3071,Polizei,police
+31001_3072,Feuerwehr,Fire department
+31001_3073,Kaserne,barracks
+31001_3074,Schutzbunker,Protective bunker
+31001_3075,Justizvollzugsanstalt,Correctional facility
+31001_3080,Friedhofsgebäude,Cemetery building
+31001_3081,Trauerhalle,Mourning Hall
+31001_3082,Krematorium,crematorium
+31001_3090,Empfangsgebäude,Reception building
+31001_3091,Bahnhofsgebäude,Station building
+31001_3092,Flughafengebäude,Airport building
+31001_3094,Gebäude zum U-Bahnhof,Building to the subway station
+31001_3095,Gebäude zum S-Bahnhof,Building to the S-Bahn station
+31001_3097,Gebäude zum Busbahnhof,Bus station building
+31001_3098,Empfangsgebäude Schifffahrt,Shipping reception building
+31001_3100,Gebäude für öffentliche Zwecke mit Wohnen,Building for public purposes with housing
+31001_3200,Gebäude für Erholungszwecke,Buildings for recreational purposes
+31001_3210,Gebäude für Sportzwecke,Building for sports purposes
+31001_3211,"Sport-, Turnhalle","Sports hall, gymnasium"
+31001_3212,Gebäude zum Sportplatz,Building to the sports field
+31001_3220,Badegebäude,Bath building
+31001_3221,Hallenbad,Indoor swimming pool
+31001_3222,Gebäude im Freibad,Building in the outdoor pool
+31001_3230,Gebäude im Stadion,Buildings in the stadium
+31001_3240,Gebäude für Kurbetrieb,Building for spa operations
+31001_3241,Badegebäude für medizinische Zwecke,Bath building for medical purposes
+31001_3242,Sanatorium,sanatorium
+31001_3260,Gebäude im Zoo,Buildings in the zoo
+31001_3261,Empfangsgebäude des Zoos,Zoo reception building
+31001_3262,"Aquarium, Terrarium, Voliere","Aquarium, terrarium, aviary"
+31001_3263,Tierschauhaus,Animal show house
+31001_3264,Stall im Zoo,Stable in the zoo
+31001_3270,Gebäude im botanischen Garten,Buildings in the botanical garden
+31001_3271,Empfangsgebäude des botanischen Gartens,Reception building of the botanical garden
+31001_3272,Gewächshaus (Botanik),Greenhouse (botany)
+31001_3273,Pflanzenschauhaus,Plant show house
+31001_3280,Gebäude für andere Erholungseinrichtung,Building for other recreational facilities
+31001_3281,Schutzhütte,Shelter
+31001_3290,Touristisches Informationszentrum,Tourist information center
+31001_9998,Nach Quellenlage nicht zu spezifizieren,Cannot be specified based on sources
+51001_1001,Wasserturm,Water tower
+51001_1002,Kirchturm,Church tower
+51001_1003,Aussichtsturm,Observation tower
+51001_1004,Kontrollturm,Control tower
+51001_1005,Kühlturm,Cooling tower
+51001_1006,Leuchtturm,lighthouse
+51001_1007,Feuerwachturm,Fire lookout tower
+51001_1008,"Sende-,Funkturm",Transmission and radio tower
+51001_1009,"Stadt-,Torturm",City gate tower
+51001_1010,Förderturm,conveyor tower
+51001_1011,Bohrturm,derrick
+51001_1012,"Schloss-, Burgturm","Palace, castle tower"
+51001_9998,Nach Quellenlage nicht zu spezifizieren,Cannot be specified based on sources
+51001_9999,Sonstiges,Miscellaneous
+51002_1215,Biogasanlage,Biogas plant
+51002_1220,Windrad,Wind turbine
+51002_1230,Solarzellen,Solar cells
+51002_1250,Mast,mast
+51002_1251,Freileitungsmast,overhead line mast
+51002_1260,Funkmast,Radio mast
+51002_1280,Radioteleskop,radio telescope
+51002_1290,Schornstein,chimney
+51002_1330,Kran,crane
+51002_1331,Drehkran,Slewing crane
+51002_1332,Portalkran,Gantry crane
+51002_1333,Laufkran,overhead crane
+51002_1350,Hochofen,blast furnace
+51002_1400,Umformer,converter
+51002_9999,Sonstiges,Miscellaneous
+51003_1201,Silo,silo
+51003_1205,Tank,tank
+51003_1206,Gasometer,gasometer
+51003_9999,Sonstiges,Miscellaneous
+51006_1430,Zuschauertribüne,spectator stand
+51006_1431,"Zuschauertribüne, überdacht",Covered spectator stand
+51006_1432,"Zuschauertribüne, nicht überdacht","Spectator stand, not covered"
+51006_1440,Stadion,stadium
+51006_1441,"Stadion, überdacht","Stadium, covered"
+51006_1442,"Stadion, nicht überdacht","Stadium, not covered"
+51006_1470,Sprungschanze (Anlauf),ski jump (inrun)
+51006_1490,Gradierwerk,graduation tower
+51006_9999,Sonstiges,Miscellaneous
+51007_1110,Aquädukt,aqueduct
+51007_1210,Wachturm,Watchtower
+51007_1400,Befestigung (Burgruine),Fortification (castle ruins)
+51007_1500,Historische Mauer,Historical wall
+51007_1510,Stadtmauer,City wall
+51007_1520,Sonstige historische Mauer,Other historical wall
+51007_9999,Sonstiges,Miscellaneous
+51009_1610,Überdachung,canopy
+51009_1611,Carport,Carport
+51009_1700,Mauer,Wall
+51009_1750,Denkmal,monument
+51009_9999,Sonstiges,Miscellaneous
+52003_1010,Schiffshebewerk,Ship lift
+52003_1020,Kammerschleuse,Chamber lock
+53001_1800,Brücke,Bridge
+53001_1806,Drehbrücke,Swing bridge
+53001_1807,Hebebrücke,lifting bridge
+53001_1808,Zugbrücke,drawbridge
+53001_1830,"Hochbahn, Hochstraße","Elevated railway, elevated road"
+53001_1890,Schleusenkammer,lock chamber
+53009_2030,Staumauer,Dam wall
+53009_2050,Wehr,Weir
+53009_2060,Sicherheitstor,Security gate
+53009_2070,Siel,Siel
+53009_2080,Sperrwerk,barrier
+53009_2090,Schöpfwerk,Creation
