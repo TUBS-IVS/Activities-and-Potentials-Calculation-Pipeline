@@ -299,7 +299,7 @@ It also assigns a **Bosserhof class** (e.g. `normal office`, `discount stores`, 
 
 ## Running the Tests
 
-The test suite covers all pipeline logic except the live LLM API. All 61 tests run in under one second:
+The test suite covers all pipeline logic:
 
 ```bash
 pytest tests/ -v
