@@ -31,29 +31,29 @@ The pipeline was applied to the **Greater Braunschweig Region, Germany** and ach
 The four-stage framework mirrors the methodology described in the paper (Section 4):
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────┐
 │  Stage 1 · Geometric Preprocessing          (Paper §4.1, Notebooks 01–02)│
 │  ─ Clean ALKIS 3D buildings, compute footprint area & volume             │
-│  ─ Merge duplicate/overlapping polygons (POI-aware)                     │
-│  ─ Supplement missing buildings with OSM footprints                     │
-├─────────────────────────────────────────────────────────────────────────┤
+│  ─ Merge duplicate/overlapping polygons (POI-aware)                      │
+│  ─ Supplement missing buildings with OSM footprints                      │
+├──────────────────────────────────────────────────────────────────────────┤
 │  Stage 2 · Semantic Enrichment              (Paper §4.2, Notebooks 03–05)│
-│  ─ Extract & clean OSM POIs                                             │
-│  ─ Spatial-join ALKIS function labels, OSM land-use, OSM building tags  │
-│  ─ Attach POIs to buildings (intersection + 100 m nearest-neighbour)    │
-│  ─ Aggregate to one record per building (gml_id)                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Stage 3 · LLM-based Classification        (Paper §4.3, Notebooks 06–09)│
-│  ─ Convert each building record to a compact natural-language sentence  │
-│  ─ LLM assigns MiD activity labels + Bosserhof building-use class       │
-│  ─ Checkpointed every 50 rows; failed rows retried automatically        │
-├─────────────────────────────────────────────────────────────────────────┤
+│  ─ Extract & clean OSM POIs                                              │
+│  ─ Spatial-join ALKIS function labels, OSM land-use, OSM building tags   │
+│  ─ Attach POIs to buildings (intersection + 100 m nearest-neighbour)     │
+│  ─ Aggregate to one record per building (gml_id)                         │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Stage 3 · LLM-based Classification        (Paper §4.3, Notebooks 06–09) │
+│  ─ Convert each building record to a compact natural-language sentence   │
+│  ─ LLM assigns MiD activity labels + Bosserhof building-use class        │
+│  ─ Checkpointed every 50 rows; failed rows retried automatically         │
+├──────────────────────────────────────────────────────────────────────────┤
 │  Stage 4 · Activity-Informed Disaggregation (Paper §4.4, Notebooks 10–11)│
-│  ─ Spatially assign buildings to TAZs                                   │
-│  ─ Redistribute zonal totals ∝ building volume × Bosserhof weight       │
-│  ─ Hierarchical fallback (TAZ → neighbours → study area)               │
-│  ─ Percentile-based volume caps prevent unrealistic concentrations      │
-└─────────────────────────────────────────────────────────────────────────┘
+│  ─ Spatially assign buildings to TAZs                                    │
+│  ─ Redistribute zonal totals ∝ building volume × Bosserhof weight        │
+│  ─ Hierarchical fallback (TAZ → neighbours → study area)                 │
+│  ─ Percentile-based volume caps prevent unrealistic concentrations       │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Notebook Sequence
