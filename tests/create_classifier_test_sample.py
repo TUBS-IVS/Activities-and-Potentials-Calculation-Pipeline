@@ -1,11 +1,11 @@
 """
-create_llm_test_sample.py — Sample diverse rows from the real condensed buildings
-file and save as tests/data/sample_condensed_buildings.parquet.
+create_classifier_test_sample.py — Sample diverse rows from the real condensed
+buildings file and save as tests/data/sample_condensed_buildings.parquet.
 
 Run once after NB05 produces a new condensed buildings file:
-    python tests/create_llm_test_sample.py
+    python tests/create_classifier_test_sample.py
 
-The output is a small (24-row) fixture used by test_06_llm_mock.py so tests
+The output is a small (24-row) fixture used by test_06_rule_based.py so tests
 run on realistic inputs without loading the full 500k-row dataset.
 """
 
@@ -26,13 +26,27 @@ df = gpd.read_file(CONDENSED_BUILDINGS_FILE)
 df = df.drop(columns=["geometry"])
 print(f"Loaded {len(df):,} rows")
 
+if "function" not in df.columns:
+    raise SystemExit(
+        "ERROR: no 'function' column in the condensed buildings file.\n"
+        "rule_utils.ALKIS_RULES is keyed on the raw ALKIS code, so notebook 05 "
+        "must carry `function` through. Re-run notebook 05 and try again."
+    )
+
 buckets = {
+    # POI-driven rows (layer 1)
     "school":       df[df["amenity"].astype(str).str.contains("school", na=False)],
     "kindergarten": df[df["amenity"].astype(str).str.contains("kindergarten", na=False)],
     "restaurant":   df[df["amenity"].astype(str).str.contains("restaurant", na=False)],
     "supermarket":  df[df["shop"].astype(str).str.contains("supermarket", na=False)],
     "hospital":     df[df["amenity"].astype(str).str.contains("hospital", na=False)],
     "office":       df[df["amenity"].astype(str).str.contains("office", na=False)],
+    # ALKIS-driven rows (layer 2) — the two codes that between them cover 85%
+    # of the dataset, so the fixture exercises the dominant paths, not just the
+    # interesting minority ones.
+    "generic_commercial": df[(df["function"] == "31001_2000") & df["amenity"].isna() & df["shop"].isna()],
+    "dwelling":           df[(df["function"] == "31001_1000") & df["amenity"].isna() & df["shop"].isna()],
+    # No usable signal
     "named_only":   df[df["osm_names"].notna() & df["amenity"].isna() & df["shop"].isna()],
     "sparse":       df[df["amenity"].isna() & df["shop"].isna() & df["osm_names"].isna()],
 }
@@ -47,4 +61,4 @@ for bucket, bdf in buckets.items():
 
 out = pd.concat(rows, ignore_index=True)
 out.to_parquet(OUT_FILE, index=False)
-print(f"\nSaved {len(out)} rows → {OUT_FILE}")
+print(f"\nSaved {len(out)} rows -> {OUT_FILE}")

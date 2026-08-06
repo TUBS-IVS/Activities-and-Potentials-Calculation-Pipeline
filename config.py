@@ -59,27 +59,76 @@ LANDUSE_FILES = {
 # --- Reference files (shipped with the repo) ---
 BUILDING_FUNCTION_CODELIST = REFERENCE_DIR / "building_function_codelist.csv"
 ALKIS_ACTIVITY_MAP         = REFERENCE_DIR / "alkis_building_activity_map.xlsx"
-BUILDING_FUNCTION_XML      = REFERENCE_DIR / "BuildingFunctionTypeAdV.xml"
 
 # --- Intermediate / output files (written by the pipeline) ---
 CLIPPED_PBF_FILE          = OUTPUT_DIR / "area_of_study_clipped.pbf"
-ESSENTIAL_POIS_FILE       = OUTPUT_DIR / "01_essential_pois.gpkg"
 ALL_POIS_FILE             = OUTPUT_DIR / "01_all_pois.gpkg"
 ALL_BUILDINGS_OSM_FILE    = OUTPUT_DIR / "01_all_buildings_osm.gpkg"
 VOLUMES_FILTERED_FILE     = OUTPUT_DIR / "01_building_volumes_filtered.gpkg"
 OSM_POIS_MODIFIED_FILE    = OUTPUT_DIR / "03_osm_pois_modified.gpkg"
-OSM_POIS_CLEANED_FILE     = OUTPUT_DIR / "03_osm_pois_cleaned.gpkg"
 ENRICHED_BUILDINGS_FILE   = OUTPUT_DIR / "04_enriched_building_volume_data.gpkg"
 CONDENSED_BUILDINGS_FILE  = OUTPUT_DIR / "05_condensed_buildings_with_pois.gpkg"
-LLM_PREDICTIONS_DIR       = OUTPUT_DIR / "llm_predictions"
-LLM_CHECKPOINT_FILE       = LLM_PREDICTIONS_DIR / "predictions_checkpoint.parquet"
-LLM_ERRORS_FILE           = LLM_PREDICTIONS_DIR / "prediction_errors.parquet"
-LLM_MERGED_FILE           = OUTPUT_DIR / "09_llm_predictions_merged.gpkg"
-POTENTIALS_FILE           = OUTPUT_DIR / "10_final_potentials.gpkg"
-REDISTRIBUTION_FILE       = OUTPUT_DIR / "10_building_level_redistributed.gpkg"
-REDISTRIBUTION_VALIDATION = OUTPUT_DIR / "10_redistribution_validation.csv"
-REDISTRIBUTION_LOG        = OUTPUT_DIR / "10_redistribution_allocation_log.csv"
-FINAL_RESULTS_FILE        = OUTPUT_DIR / "11_final_results.gpkg"
+CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / "06_classified_buildings.gpkg"
+
+# --- Buildings the validation sample was drawn from (notebook 10) ---
+# The condensed dataset whose rows the annotated workbook indexes into.
+#
+# Needed because notebook 05 derives `gml_id` from the positional row index, which is
+# NOT reproducible across runs: a fresh run of identical code produced 567,961
+# buildings against this file's 578,080, and of the validation ids that still resolved,
+# NONE had a matching volume. Scoring against a regenerated dataset therefore compares
+# different buildings while every join looks healthy.
+#
+# The workbook stores those positional ids, so this file is the only input that can be
+# scored against it. Notebook 10 verifies the correspondence via volume_m3 before
+# scoring, and refuses to score if it fails.
+VALIDATION_BUILDINGS_FILE = (
+    ROOT.parent / "Capacity_Calculation-pipeline-original" / "Areas-of-interest-POIs"
+    / "condensed_buildings_with_pois.gpkg"
+)
+REDISTRIBUTION_FILE       = OUTPUT_DIR / "07_building_level_redistributed.gpkg"
+REDISTRIBUTION_VALIDATION = OUTPUT_DIR / "07_redistribution_validation.csv"
+REDISTRIBUTION_LOG        = OUTPUT_DIR / "07_redistribution_allocation_log.csv"
+FINAL_RESULTS_FILE        = OUTPUT_DIR / "08_final_results.gpkg"
+
+# --- Manual validation (notebooks 09 & 10) ---
+VALIDATION_DIR            = ROOT / "data" / "validation"
+# Hand-annotated workbook: an earlier classification run's predictions with the
+# validator's verdict encoded as a cell fill colour. See notebook 09.
+VALIDATION_SOURCE_FILE    = VALIDATION_DIR / "sample_version_1_balanced.xlsx"
+VALIDATION_GROUND_TRUTH   = VALIDATION_DIR / "09_ground_truth.parquet"
+VALIDATION_SCORE_DETAIL   = VALIDATION_DIR / "10_score_detail.csv"
+VALIDATION_SCORE_SUMMARY  = VALIDATION_DIR / "10_score_summary.csv"
+
+# Fill colours used by the validator, as ARGB hex (openpyxl reports them this
+# way). These are Excel's standard green/red/yellow conditional-format fills.
+VALIDATION_COLOURS = {
+    "FFC6EFCE": "correct",     # green  — prediction accepted as-is
+    "FFFFC7CE": "error",       # red    — wrong; corrected value typed in the cell
+    "FFFFEB9C": "uncertain",   # yellow — validator could not decide; excluded
+}
+
+# Free-text values the validator used to mean "this building hosts no activity"
+# (i.e. it is residential). These are a real, scoreable ground truth of "empty",
+# distinct from an empty cell, which means "flagged wrong but never corrected".
+VALIDATION_NO_ACTIVITY_TERMS = {"living", "residential", "seems residential", "none", "no"}
+
+# Misspelled activity names OBSERVED in this workbook's hand-typed corrections.
+# Without an entry the name matches nothing and the label is SILENTLY DROPPED from
+# the ground truth, which then penalises any classifier that predicted it correctly.
+# Exactly two such typos exist in sample_version_1_balanced.xlsx:
+#   gml_id 229408  row 584   "['Kindergarden', 'Leisure', 'Workers']"  -> lost Kindergarten
+#   gml_id 478921  row 1051  "['Workers', 'Leisue']"                   -> lost Leisure
+#
+# DO NOT pre-populate this with plausible-looking typos that do not occur. Notebook 09
+# asserts that no unrecognised token resembles an activity name, and that assertion is
+# the real safety mechanism. A speculative entry would silently absorb a future typo
+# before the assertion could report it — so guessing here makes the ground truth less
+# trustworthy, not more. Add an entry only after the notebook has failed and named it.
+VALIDATION_ACTIVITY_TYPO_FIXES = {
+    "kindergarden": "Kindergarten",
+    "leisue": "Leisure",
+}
 
 # ──────────────────────────────────────────────
 # COORDINATE REFERENCE SYSTEM
@@ -92,16 +141,11 @@ TARGET_CRS = "EPSG:25832"   # UTM Zone 32N — change for other regions
 # ──────────────────────────────────────────────
 
 MIN_BUILDING_VOLUME_M3  = 1    # filter in notebook 01 (geometry cleaning)
-MIN_CONDENSED_VOLUME_M3 = 30   # filter in notebook 05 (before LLM input)
+MIN_CONDENSED_VOLUME_M3 = 30   # filter in notebook 05 (before classification)
 
 # ──────────────────────────────────────────────
 # OSM POI EXTRACTION
 # ──────────────────────────────────────────────
-
-ESSENTIAL_SHOP_CATEGORIES = [
-    "bakery", "supermarket", "kiosk", "butcher", "convenience",
-    "beverages", "chemist", "laundry", "stationery", "greengrocer", "general",
-]
 
 EXCLUDE_AMENITIES = [
     "parking", "bench", "parking_space", "waste_basket", "bicycle_parking",
@@ -132,13 +176,29 @@ ALLOWED_INFORMATION_TYPES = ["office"]
 
 # ──────────────────────────────────────────────
 # BUILDING LABEL EXCLUSIONS
-# Non-enterable / infrastructure building types to remove from ALKIS data
+# Non-enterable / infrastructure building types to remove from ALKIS data.
+#
+# NOTE: this list matches on the English `label_en` text, unlike
+# rule_utils.ALKIS_RULES which is keyed on the raw code. An entry that does not
+# exactly match a real codelist label is a SILENT no-op — it filters nothing and
+# raises nothing. Validate entries against the CODELIST, not against your data:
+# a label absent from the codelist is a typo (a bug), whereas a valid label with
+# zero buildings is simply inactive in this region (fine).
+#     python -c "import pandas as pd, config as c; \
+#       cl=pd.read_csv(c.BUILDING_FUNCTION_CODELIST, encoding='utf-8', encoding_errors='replace'); \
+#       print('typos:', [l for l in c.LABELS_TO_REMOVE if l not in set(cl['label_en'])])"
 # ──────────────────────────────────────────────
 
 LABELS_TO_REMOVE = [
     "canopy",
     "Agricultural and forestry business building",
-    "Buildings for supplying energy",
+    # Was "Buildings for supplying energy", which matches no codelist label and
+    # was therefore a no-op. The real label for 31001_2501 is below. It happens
+    # to be unused in Lower Saxony (0 buildings — like every other specific
+    # supply subtype: 2510 water, 2520 electricity, 2570 gas, 2590 utility,
+    # 2591 pumping station), so fixing it changes nothing here, but it would
+    # have failed silently in a region that does populate the code.
+    "Energy supply buildings",
     "silo",
     "mast",
     "Solar cells",
@@ -157,19 +217,10 @@ LABELS_TO_REMOVE = [
 ]
 
 # ──────────────────────────────────────────────
-# LLM API SETTINGS
+# ACTIVITY LABEL TAXONOMY
 # ──────────────────────────────────────────────
 
-LLM_API_URL        = "https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send"
-LLM_MODEL          = "gpt-oss-120b"
-LLM_REASONING      = "high"       # "low", "medium", or "high"
-LLM_MAX_RETRIES    = 3
-LLM_BACKOFF_SEC    = 2.0
-LLM_TIMEOUT_SEC    = 120
-LLM_MAX_WORKERS    = 4            # ThreadPoolExecutor parallelism
-LLM_CHUNK_SIZE     = 50           # rows per checkpoint flush
-
-# Valid MiD activity labels the LLM may assign
+# Valid MiD activity labels a building may be assigned (see rule_utils.py)
 TARGET_MID_LABELS = {
     "work", "university", "school", "childcare",
     "retail_daily", "retail_non_daily", "leisure",
@@ -178,7 +229,7 @@ TARGET_MID_LABELS = {
 
 # ──────────────────────────────────────────────
 # BOSSERHOF CLASS NORMALIZATION
-# Maps non-standard LLM outputs → canonical class names
+# Maps non-standard classifier outputs → canonical class names
 # ──────────────────────────────────────────────
 
 BOSSERHOF_NORMALIZATION_MAP = {

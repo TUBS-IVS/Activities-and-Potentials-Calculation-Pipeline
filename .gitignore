@@ -1,34 +1,87 @@
-# ── Secrets ───────────────────────────────────────────────────────────────────
-.env
-
 # ── Large input / output data (region-specific, not for version control) ──────
+# The pipeline reads multi-GB cadastral and OSM extracts and writes ~2 GB of
+# intermediates. None of it belongs in git; all of it is reproducible by running
+# the notebooks in dependency order (02 → 03 → 01 → 04 → 05 → 06 → 07 → 08).
 data/input/*
 !data/input/.gitkeep
 
 data/output/*
 !data/output/.gitkeep
-!data/output/llm_predictions/
-data/output/llm_predictions/*
-!data/output/llm_predictions/.gitkeep
+
+# ── Validation data ───────────────────────────────────────────────────────────
+# data/validation/ IS tracked — the annotation workbooks and the decoded ground
+# truth are small (< 250 KB each) and are the published benchmark. But the
+# building file notebook 10 scores against is 337 MB, so guard against anyone
+# vendoring it (or anything else heavy) in here by accident.
+data/validation/*.gpkg
+data/validation/*.pbf
+data/validation/*.gz
+data/validation/*.zip
+
+# ── Belt-and-braces size guard ────────────────────────────────────────────────
+# GitHub hard-blocks files over 100 MB. These formats are never small in this
+# project, so refuse them anywhere they are not explicitly whitelisted below.
+*.gpkg
+*.pbf
+*.tif
+*.tiff
+*.shp
+*.shx
+*.dbf
+*.sbn
+*.sbx
+
+# ...except the small synthetic test fixtures, which must stay tracked.
+!tests/data/*.gpkg
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
-.pytest_cache/
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
 env/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
+*.ipynb~
+
+# ── Office / editor temp files ────────────────────────────────────────────────
+# Excel writes a ~$-prefixed lock file next to any open workbook — these appear
+# in data/validation/ whenever the annotation sheet is open.
+~$*
+*.tmp
+*.bak
+*.swp
+*~
+
+# ── Editors / IDEs ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
 
 # ── Claude Code internal settings ─────────────────────────────────────────────
 .claude/
 
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini

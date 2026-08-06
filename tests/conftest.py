@@ -22,11 +22,6 @@ def test_buildings():
 
 
 @pytest.fixture(scope="session")
-def test_boundary():
-    return gpd.read_file(TEST_DATA_DIR / "test_boundary.gpkg")
-
-
-@pytest.fixture(scope="session")
 def test_pois():
     return gpd.read_file(TEST_DATA_DIR / "test_pois.gpkg")
 

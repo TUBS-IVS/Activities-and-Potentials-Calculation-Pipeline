@@ -6,7 +6,6 @@ Run once:
 
 Creates:
     tests/data/test_buildings.gpkg   — 20 synthetic ALKIS-like buildings
-    tests/data/test_boundary.gpkg    — study area polygon enclosing all test buildings
     tests/data/test_pois.gpkg        — 15 synthetic OSM POIs
     tests/data/test_zones.gpkg       — 3 TAZ zones with known activity totals
 """
@@ -85,20 +84,7 @@ gdf_buildings.to_file(DATA_DIR / "test_buildings.gpkg", driver="GPKG")
 print(f"Saved {len(gdf_buildings)} buildings → test_buildings.gpkg")
 
 # ──────────────────────────────────────────────
-# 2. Study boundary (encloses all buildings + margin)
-# ──────────────────────────────────────────────
-
-minx = gdf_buildings.geometry.bounds["minx"].min() - 200
-miny = gdf_buildings.geometry.bounds["miny"].min() - 200
-maxx = gdf_buildings.geometry.bounds["maxx"].max() + 200
-maxy = gdf_buildings.geometry.bounds["maxy"].max() + 200
-
-boundary = gpd.GeoDataFrame({"geometry": [box(minx, miny, maxx, maxy)]}, crs=CRS)
-boundary.to_file(DATA_DIR / "test_boundary.gpkg", driver="GPKG")
-print(f"Saved study boundary → test_boundary.gpkg")
-
-# ──────────────────────────────────────────────
-# 3. Test POIs (15 rows — various types)
+# 2. Test POIs (15 rows — various types)
 # ──────────────────────────────────────────────
 
 pois_data = [
@@ -141,7 +127,7 @@ gdf_pois.to_file(DATA_DIR / "test_pois.gpkg", driver="GPKG")
 print(f"Saved {len(gdf_pois)} POIs → test_pois.gpkg")
 
 # ──────────────────────────────────────────────
-# 4. Zone targets (3 TAZ zones with known activity totals)
+# 3. Zone targets (3 TAZ zones with known activity totals)
 # ──────────────────────────────────────────────
 
 # Zone A: western part of study area

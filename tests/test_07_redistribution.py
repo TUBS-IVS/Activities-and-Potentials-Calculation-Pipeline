@@ -1,5 +1,5 @@
 """
-test_10_redistribution.py — Tests for notebook 10: Bosserhof weights and redistribution.
+test_07_redistribution.py — Tests for notebook 07: Bosserhof weights and redistribution.
 
 Key invariants:
 1. retail wholesale has a valid weight (was the bug)
