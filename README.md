@@ -466,6 +466,19 @@ Verify: `osmium --version`
 
 > **Note:** `geopandas` and `pyrosm` install cleanly on Linux via pip (they bundle their own GDAL/GEOS via pyogrio). If you encounter GDAL errors, run `sudo apt install libgdal-dev libgeos-dev` first.
 
+### 5. Enable the notebook clean filter *(optional, recommended)*
+
+The notebooks are committed **with their cell outputs** — they are the record of the run every figure in this README comes from, so `nbstripout` is deliberately *not* used. The cost is that editors inject metadata: VS Code's Data Wrangler extension writes a full column schema into every DataFrame output when a notebook is opened, and the kernelspec gets rewritten to whatever kernel you happen to have selected. Both produce large spurious diffs.
+
+`scripts/nb_clean_filter.py` strips exactly that metadata on the way into git while leaving every output, execution count and error intact. `.gitattributes` already routes `*.ipynb` through it; git filter config is local to a clone, so enable it once with:
+
+```bash
+git config filter.nbclean.clean "python scripts/nb_clean_filter.py"
+git config filter.nbclean.smudge cat
+```
+
+Your working copy is never modified — only what git stores. Skipping this step breaks nothing: git ignores an undefined filter, you just get noisier diffs.
+
 ---
 
 ## Input Data

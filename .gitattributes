@@ -8,3 +8,11 @@
 *.xlsx    binary
 *.png     binary
 *.jpg     binary
+
+# Notebooks — strip editor-injected metadata on the way into git, keeping all
+# cell outputs (they are the record of the run the README's figures come from).
+# Requires a one-time local config, see scripts/nb_clean_filter.py:
+#     git config filter.nbclean.clean "python scripts/nb_clean_filter.py"
+#     git config filter.nbclean.smudge cat
+# A clone that skips it is unaffected — git ignores an undefined filter.
+*.ipynb   filter=nbclean
