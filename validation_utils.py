@@ -38,7 +38,7 @@ import re
 
 from config import (
     MID_LABEL_TO_ACTIVITY, BOSSERHOF_WEIGHTS, BOSSERHOF_NORMALIZATION_MAP,
-    VALIDATION_NO_ACTIVITY_TERMS,
+    BOSSERHOF_HEADLINE_CLASSES, VALIDATION_NO_ACTIVITY_TERMS,
 )
 
 
@@ -153,13 +153,26 @@ def resolve_prediction_bosserhof(raw):
     semantic normaliser, not merely a formatter, and comparing a semantically
     normalised truth against a raw prediction is not a like-for-like match.
 
-    Where it stops short of the truth side: a prediction naming two or more known
-    classes is returned unchanged, so it scores wrong. The truth side sets such
-    rows aside as unscoreable, which is right for a human annotation ("the
-    validator named several classes, there is no single truth") and wrong for a
-    model output ("the model failed to pick one"). Notebook 10 counts these in
-    the out-of-vocabulary diagnostic so the failure stays visible instead of
-    disappearing into the accuracy number.
+    Where it stops short of the truth side: a prediction naming two or more
+    UNRELATED known classes is returned unchanged, so it scores wrong. The truth
+    side sets such rows aside as unscoreable, which is right for a human
+    annotation ("the validator named several classes, there is no single truth")
+    and wrong for a model output ("the model failed to pick one"). Notebook 10
+    counts these in the out-of-vocabulary diagnostic so the failure stays visible
+    instead of disappearing into the accuracy number.
+
+    HIERARCHICAL ANSWERS ARE NOT AMBIGUITY. Every one of the 8 headline
+    categories is itself a scoreable class, so a model answering
+    "Public facilities | schools" has named two known classes — but it has not
+    failed to choose, it has given a category and its own subcategory. Observed
+    on the very first smoke-test call. Scoring that as wrong would measure format
+    compliance, not classification, so the more specific class is taken.
+
+    That charity is bounded and cannot be extended to a genuine refusal to pick:
+    "normal office or hotels" names two NON-headline classes and still scores
+    wrong. And it cannot flatter the LLM relative to the rule engine on any row
+    the rule engine could have won, because rule_utils only ever emits a single
+    canonical class and so never reaches this branch at all.
 
     Returns a canonical class, '' for an explicit no-class, or None when there is
     nothing usable — None and '' both score as "no class predicted".
@@ -170,6 +183,10 @@ def resolve_prediction_bosserhof(raw):
     mentioned = classes_mentioned(value)
     if len(mentioned) == 1:
         return mentioned[0]
+    if len(mentioned) >= 2:
+        specific = [m for m in mentioned if m not in BOSSERHOF_HEADLINE_CLASSES]
+        if len(specific) == 1:
+            return specific[0]
     return value
 
 

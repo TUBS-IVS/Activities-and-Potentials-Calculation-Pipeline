@@ -353,6 +353,25 @@ GENERIC_COMMERCIAL = {
 }
 
 # ──────────────────────────────────────────────
+# BOSSERHOF HEADLINE CATEGORIES
+# ──────────────────────────────────────────────
+# The 8 top-level categories. Each is ALSO a scoreable class in its own right
+# (verified against BOSSERHOF_WEIGHTS), which is why they need naming separately:
+# a model that answers "Public facilities | schools" has named two known classes,
+# and without this set it looks indistinguishable from one that could not choose
+# between two unrelated ones. See validation_utils.resolve_prediction_bosserhof.
+BOSSERHOF_HEADLINE_CLASSES = {
+    "transport",
+    "yards depots storage areas construction yards",
+    "industrial operations production",
+    "crafts and trades",
+    "services",
+    "retail",
+    "public facilities",
+    "facilities for culture leisure and sports",
+}
+
+# ──────────────────────────────────────────────
 # ACTIVITY LABEL TAXONOMY
 # ──────────────────────────────────────────────
 

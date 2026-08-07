@@ -91,6 +91,7 @@ ALLOWED BOSSERHOF HEADLINE CATEGORIES:
 8) Facilities for culture, leisure and sports  (subcategories: entertainment, culture | large cinemas | musical theatres | large discos, fun / leisure pools | arenas, large events | theme parks | fitness / wellness)
 
 Use a subcategory string when confident; fall back to headline category when not. Use null only if the building truly does not fit any category.
+Output EXACTLY ONE class string in "bosserhof_class" — either a subcategory or a headline category, never both, and never two alternatives. Write "schools", not "Public facilities | schools" and not "normal office or hotels".
 
 OUTPUT FORMAT (STRICT JSON ONLY):
 {

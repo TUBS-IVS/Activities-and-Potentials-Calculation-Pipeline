@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import BOSSERHOF_WEIGHTS
+from config import BOSSERHOF_WEIGHTS, BOSSERHOF_HEADLINE_CLASSES
 from llm_utils import SYSTEM_PROMPT
 from validation_utils import (
     BOSSERHOF_KNOWN, clean_bosserhof, classes_mentioned,
@@ -115,7 +115,7 @@ def test_single_class_extracted_from_prose():
 
 
 def test_multi_class_prediction_is_left_raw():
-    """Two classes named = the model failed to pick one; it must score wrong.
+    """Two UNRELATED classes named = the model failed to pick one; scores wrong.
 
     Contrast with the truth side, which EXCLUDES such rows: a human naming two
     classes means the annotation is ambiguous, but a model naming two means the
@@ -124,6 +124,48 @@ def test_multi_class_prediction_is_left_raw():
     out = resolve_prediction_bosserhof("either normal office or hotels")
     assert out not in BOSSERHOF_KNOWN
     assert len(classes_mentioned(out)) >= 2
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Public facilities | schools",        "schools"),
+    ("Services | normal office",           "normal office"),
+    ("Retail / discount stores",           "discount stores"),
+    ("Facilities for culture, leisure and sports - large cinemas", "large cinemas"),
+])
+def test_headline_plus_subcategory_takes_the_subcategory(raw, expected):
+    """A category and its own subcategory is not ambiguity.
+
+    All 8 headline categories are themselves scoreable classes, so this pattern
+    names two known classes — but the model chose, it just showed its working.
+    Observed on the first real smoke-test call ('Public facilities | schools',
+    where the truth was 'schools'). Scoring it wrong would measure format
+    compliance rather than classification.
+    """
+    assert resolve_prediction_bosserhof(raw) == expected
+
+
+def test_headline_alone_still_resolves_to_the_headline():
+    """The prompt explicitly permits falling back to a headline category."""
+    assert resolve_prediction_bosserhof("Public facilities") == "public facilities"
+    assert resolve_prediction_bosserhof("Retail") == "retail"
+
+
+def test_charity_does_not_extend_to_two_subcategories():
+    """Two non-headline classes is a genuine refusal to choose. Still wrong."""
+    out = resolve_prediction_bosserhof("Public facilities | schools | hospitals")
+    assert out not in BOSSERHOF_KNOWN
+
+
+def test_every_headline_class_is_scoreable():
+    """The premise of the rule above: headlines are real classes, not labels."""
+    for h in BOSSERHOF_HEADLINE_CLASSES:
+        assert h in BOSSERHOF_KNOWN, f'{h!r} is not in BOSSERHOF_WEIGHTS'
+
+
+def test_prompt_forbids_compound_answers():
+    """The resolver is the safety net; the prompt is the actual fix."""
+    assert "EXACTLY ONE class string" in SYSTEM_PROMPT
+    assert "never both" in SYSTEM_PROMPT
 
 
 def test_mock_fixture_classes_all_resolve():
