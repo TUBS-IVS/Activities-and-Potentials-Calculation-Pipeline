@@ -31,6 +31,23 @@ def validate(obj):
     _validate(obj, TARGET_MID_LABELS)
 
 
+def test_reason_may_contain_raw_newlines():
+    """A literal control character inside a string value must not lose the row.
+
+    Observed in the real blind run at ~0.3% of calls: the model wrote multi-line
+    prose into `reason` and json.loads rejected the entire object with
+    "Invalid control character". A well-formed classification was thrown away
+    over whitespace, and every dropped row shrinks this arm's denominator against
+    a rule engine that excludes nothing.
+    """
+    raw = ('{"interpreted_type": "school", "mid_labels": ["school", "work"], '
+           '"bosserhof_class": "schools", "reason": "first line\nsecond line"}')
+    obj = extract_first_json(raw)
+    validate(obj)
+    assert obj["bosserhof_class"] == "schools"
+    assert "\n" in obj["reason"]
+
+
 # ── Mock LLM — keyword-based, no API calls ────────────────────────────────────
 
 def mock_call_tu_llm(sentence):

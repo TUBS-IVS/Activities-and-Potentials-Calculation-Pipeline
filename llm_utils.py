@@ -179,7 +179,16 @@ def row_to_llm_input(row, fields="full"):
 def extract_first_json(text):
     m = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not m: raise ValueError("No JSON object found")
-    return json.loads(m.group(0))
+    # strict=False permits literal control characters (raw newlines, tabs) inside
+    # string values. The model writes multi-line prose into `reason` and the
+    # default parser rejects the whole object for it:
+    #   JSONDecodeError: Invalid control character at: line 5 column 382
+    # Observed at ~0.3% of rows in the blind run, i.e. ~3 buildings per 885. Each
+    # one is a well-formed answer thrown away over whitespace, and every dropped
+    # row shrinks this arm's denominator against a rule engine that excludes
+    # nothing. Nothing downstream reads `reason` as data, so relaxing this cannot
+    # affect a score.
+    return json.loads(m.group(0), strict=False)
 
 
 def validate(obj, valid_labels):
