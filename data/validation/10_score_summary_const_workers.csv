@@ -1,0 +1,13 @@
+dimension,metric,value
+activities,buildings_scored,882.0
+activities,labels_human,1526.0
+activities,labels_predicted,882.0
+activities,correct,850.0
+activities,extra,32.0
+activities,missing,676.0
+activities,precision,0.9637
+activities,recall,0.557
+activities,exact_set_match,0.3129
+bosserhof,buildings_scored,874.0
+bosserhof,correct,14.0
+bosserhof,accuracy,0.016

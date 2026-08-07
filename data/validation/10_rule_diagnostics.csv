@@ -1,0 +1,6 @@
+metric,value
+truth_not_producible,4
+bosserhof_accuracy_excluding_blocked,0.5057
+bosserhof_rows_excluding_blocked,870
+unreachable_classes,7
+source_sha256,57e43e93693e023b8e9f5a56931654a1e002036c56dcc41d2f527b174503fd2e
