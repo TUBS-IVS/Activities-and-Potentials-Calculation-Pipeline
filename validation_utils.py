@@ -33,11 +33,17 @@ recall interpretable as "of the activity claims made, how many were real" and "o
 the real activities, how many were found".
 """
 
-from config import MID_LABEL_TO_ACTIVITY
+import math
+import re
+
+from config import (
+    MID_LABEL_TO_ACTIVITY, BOSSERHOF_WEIGHTS, BOSSERHOF_NORMALIZATION_MAP,
+    VALIDATION_NO_ACTIVITY_TERMS,
+)
 
 
 def collapse_to_zone_activities(mid_labels):
-    """Map a rule-engine MiD label set onto the 7 zone activity names.
+    """Map a classifier's MiD label set onto the 7 zone activity names.
 
     The classifier emits 12 MiD labels; the ground truth is recorded in the 7 zone
     activity names, because that is the granularity the zone data supplies and the
@@ -46,10 +52,125 @@ def collapse_to_zone_activities(mid_labels):
     it must be applied before any comparison or the two sides are not measuring
     the same thing.
     """
+    # list() before any truth test. Parquet round-trips a list column as
+    # numpy.ndarray, and `if not mid_labels` raises
+    #   ValueError: truth value of an array with more than one element is ambiguous
+    # for length >= 2 — but passes for length 0 and 1, so a sparse test misses it.
+    # rule_utils returns real Python lists, so this would have failed ONLY for the
+    # LLM arm, only after a multi-hour run, and read as an LLM defect.
+    if mid_labels is None:
+        return set()
+    mid_labels = list(mid_labels)
     if not mid_labels:
         return set()
     return {MID_LABEL_TO_ACTIVITY[label]
             for label in mid_labels if label in MID_LABEL_TO_ACTIVITY}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BOSSERHOF NORMALISATION
+# ──────────────────────────────────────────────────────────────────────────────
+# Lifted verbatim out of notebook 09 so the TRUTH side and the PREDICTION side
+# run the same code. They previously did not: the truth went through this full
+# stack, while score_bosserhof's prediction side was only
+#     '' if v is None else str(v).strip().lower()
+# Run the 46 Bosserhof strings the system prompt authorises through both: the
+# weak path resolves 30/46, this one resolves 46/46. Casualties of the weak path
+# included 'restaurants / gastronomy', 'retail (small-scale)', 'open-plan
+# office', 'hypermarkets / superstores' and 'fitness / wellness' — the model is
+# explicitly told to emit those spellings, and every one of them scored wrong for
+# punctuation reasons alone.
+#
+# Applying it to both arms cannot advantage either: clean_bosserhof is a provable
+# identity on all 47 BOSSERHOF_WEIGHTS keys (pinned in
+# tests/test_bosserhof_normalisation.py), so it cannot change a rule-engine
+# prediction, which only ever emits those keys.
+
+BOSSERHOF_KNOWN = {k.lower() for k in BOSSERHOF_WEIGHTS}
+
+BOSSERHOF_TYPO_FIXES = {
+    'restaurant gastronomy':      'restaurants gastronomy',
+    'customer oriented service':  'customer oriented services',
+    'business oriented service':  'business oriented services',
+    'business oriented business': 'business oriented services',
+    'school':                     'schools',
+    'kindergarten':               'kindergartens',
+    'hospital':                   'hospitals',
+    'hotel':                      'hotels',
+    'university':                 'universities',
+    'research institute':         'research institutes',
+    'nursing':                    'nursing homes',
+    'nursing home':               'nursing homes',
+    'craft business':             'craft businesses',
+    'diy store':                  'diy stores',
+    'shopping center':            'shopping centers',
+    'small scale retail':         'retail small scale',
+}
+BOSSERHOF_NO_CLASS_TERMS = {'none', 'no', 'vacancy', 'vacant', 'just garages', 'garages'}
+BOSSERHOF_SUBSTRING_FIXES = {
+    r'\brestaurant gastronomy\b':     'restaurants gastronomy',
+    r'\bleisture\b':                  'leisure',
+    r'\bcustomer oriented service\b': 'customer oriented services',
+    r'\bbusiness oriented service\b': 'business oriented services',
+}
+
+
+def clean_bosserhof(raw):
+    """Normalise a Bosserhof string. '' means an explicit no-class; None unusable."""
+    if raw is None:
+        return None
+    text = re.sub(r'[^a-z0-9 ]+', ' ', str(raw).lower())
+    text = re.sub(r'\s+', ' ', text).strip()
+    if text in ('', 'nan'):
+        return None
+    if (text in VALIDATION_NO_ACTIVITY_TERMS or text in BOSSERHOF_NO_CLASS_TERMS
+            or 'residential' in text):
+        return ''
+    for pattern, replacement in BOSSERHOF_SUBSTRING_FIXES.items():
+        text = re.sub(pattern, replacement, text)
+    text = BOSSERHOF_TYPO_FIXES.get(text, text)
+    return BOSSERHOF_NORMALIZATION_MAP.get(text, text)
+
+
+def classes_mentioned(text):
+    """Known classes appearing as substrings, longest first so a class containing
+    another (retail small scale vs retail) is not double-counted."""
+    if not text:
+        return []
+    found, remaining = [], text
+    for known in sorted(BOSSERHOF_KNOWN, key=len, reverse=True):
+        if known in remaining:
+            found.append(known)
+            remaining = remaining.replace(known, ' ')
+    return found
+
+
+def resolve_prediction_bosserhof(raw):
+    """Prediction-side counterpart of notebook 09's resolve_bosserhof.
+
+    Deliberately mirrors the SAME stage list the truth side ran — clean, then
+    single-class extraction from free text — because clean_bosserhof is a
+    semantic normaliser, not merely a formatter, and comparing a semantically
+    normalised truth against a raw prediction is not a like-for-like match.
+
+    Where it stops short of the truth side: a prediction naming two or more known
+    classes is returned unchanged, so it scores wrong. The truth side sets such
+    rows aside as unscoreable, which is right for a human annotation ("the
+    validator named several classes, there is no single truth") and wrong for a
+    model output ("the model failed to pick one"). Notebook 10 counts these in
+    the out-of-vocabulary diagnostic so the failure stays visible instead of
+    disappearing into the accuracy number.
+
+    Returns a canonical class, '' for an explicit no-class, or None when there is
+    nothing usable — None and '' both score as "no class predicted".
+    """
+    value = clean_bosserhof(raw)
+    if value is None or value == '' or value in BOSSERHOF_KNOWN:
+        return value
+    mentioned = classes_mentioned(value)
+    if len(mentioned) == 1:
+        return mentioned[0]
+    return value
 
 
 def confusion_counts(predicted, truth):
@@ -224,16 +345,66 @@ def label_accounting(pairs):
     """
     metrics, _rows = score_activities(pairs)
     correct = metrics["n_true_positive"]
+    n_predicted = correct + metrics["n_over_predicted"]
+    n_truth = correct + metrics["n_missed"]
+    p_lo, p_hi = wilson_interval(correct, n_predicted)
+    r_lo, r_hi = wilson_interval(correct, n_truth)
     return {
         "buildings": metrics["n_rows"],
-        "truth_labels": correct + metrics["n_missed"],
-        "predicted_labels": correct + metrics["n_over_predicted"],
+        "truth_labels": n_truth,
+        "predicted_labels": n_predicted,
         "correct": correct,
         "extra": metrics["n_over_predicted"],
         "missing": metrics["n_missed"],
         "precision": metrics["precision"],
+        "precision_lo": p_lo,
+        "precision_hi": p_hi,
         "recall": metrics["recall"],
+        "recall_lo": r_lo,
+        "recall_hi": r_hi,
+        "exact_set_match": metrics["exact_match_rate"],
     }
+
+
+def bosserhof_accounting(pairs):
+    """Headline counts for Bosserhof, the single-label dimension.
+
+    label_accounting CANNOT be reused here, and the failure is silent. It
+    delegates to score_activities, whose confusion_counts does
+    `set(predicted or [])` — on the string 'normal office' that yields a set of
+    12 characters, and the function returns a plausible-looking number that means
+    nothing at all.
+    """
+    metrics, _rows = score_bosserhof(pairs)
+    lo, hi = wilson_interval(metrics["n_correct"], metrics["n_rows"])
+    return {
+        "buildings": metrics["n_rows"],
+        "correct": metrics["n_correct"],
+        "accuracy": metrics["accuracy"],
+        "accuracy_lo": lo,
+        "accuracy_hi": hi,
+    }
+
+
+def wilson_interval(successes, total, z=1.96):
+    """Wilson score 95% interval for a binomial rate. (lo, hi), or (nan, nan).
+
+    Needed because the primary subsets are small and four-decimal point estimates
+    invite conclusions they cannot support. At the sizes this benchmark actually
+    has: Bosserhof red n=155 at 0.129 is +/- ~5.3 pp, activity red recall n=329
+    at 0.670 is +/- ~5.1 pp, and even the full Bosserhof set n=874 at 0.503 is
+    +/- ~3.3 pp. An arm difference smaller than that is not a difference.
+
+    Wilson rather than normal-approximation: it stays inside [0, 1] and behaves
+    at proportions near 0 or 1, where several per-class rates here sit.
+    """
+    if not total:
+        return (float("nan"), float("nan"))
+    p = successes / total
+    denom = 1 + z ** 2 / total
+    centre = (p + z ** 2 / (2 * total)) / denom
+    margin = z * math.sqrt(p * (1 - p) / total + z ** 2 / (4 * total ** 2)) / denom
+    return (max(0.0, centre - margin), min(1.0, centre + margin))
 
 
 def format_bosserhof_report(metrics, title="BOSSERHOF CLASS"):
