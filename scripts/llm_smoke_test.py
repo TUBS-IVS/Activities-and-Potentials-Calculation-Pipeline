@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-from config import LLM_MODEL, VALIDATION_BUILDINGS_FILE
+from config import LLM_MODEL, LLM_MAX_WORKERS, VALIDATION_BUILDINGS_FILE
 # Prompt, transport and per-row driver all come from llm_utils. This script used
 # to carry its own copies; the prompt had drifted (no Bosserhof taxonomy at all)
 # so a green smoke test said nothing about what notebook 06b would actually send.
@@ -58,7 +58,9 @@ def pick_sample(df, n):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--n', type=int, default=10, help='Number of buildings to test')
-    parser.add_argument('--workers', type=int, default=4, help='Parallel API workers')
+    parser.add_argument('--workers', type=int, default=LLM_MAX_WORKERS,
+                        help=f'Parallel API workers (default {LLM_MAX_WORKERS}, '
+                             'from config.LLM_MAX_WORKERS)')
     parser.add_argument('--fields', choices=['full', 'blind'], default='full',
                         help="'blind' drops osm_names/website/email, matching the "
                              "evidence the rule engine is allowed to see")

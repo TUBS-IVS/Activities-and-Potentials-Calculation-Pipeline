@@ -299,14 +299,25 @@ LLM_REASONING      = "high"       # "low", "medium", or "high"
 LLM_MAX_RETRIES    = 3
 LLM_BACKOFF_SEC    = 2.0
 LLM_TIMEOUT_SEC    = 120
-LLM_MAX_WORKERS    = 4            # ThreadPoolExecutor parallelism.
-                                  # The KI-Toolbox concurrency ceiling is
-                                  # undocumented and the retry path treats HTTP
-                                  # 429 exactly like a network error, with a
-                                  # 2/4/6 s linear backoff that is far too short
-                                  # for a rate limit. Ask the operators before
-                                  # raising this.
-LLM_CHUNK_SIZE     = 50           # rows per checkpoint flush
+LLM_MAX_WORKERS    = 1            # ThreadPoolExecutor parallelism.
+                                  # Deliberately 1: one request at a time.
+                                  # The benchmark is 1,391 buildings, small
+                                  # enough that serialising costs wall clock and
+                                  # nothing else, and it removes the only
+                                  # concurrency-shaped failure mode. The
+                                  # KI-Toolbox rate limit is undocumented and the
+                                  # retry path treats HTTP 429 exactly like a
+                                  # network error, with a 2/4/6 s linear backoff
+                                  # far too short for one — so a parallel run
+                                  # that trips it retries into the same wall
+                                  # three times and drops the row.
+                                  # Raise only after asking the operators.
+LLM_CHUNK_SIZE     = 25           # rows per checkpoint flush.
+                                  # Halved alongside the worker count: at one
+                                  # request at a time a chunk is ~6-19 min, so
+                                  # an interrupted run loses at most that much.
+                                  # The file is a few hundred KB, so the extra
+                                  # rewrites are free.
 
 # --- Production run only (the full condensed file). Left wired but unrun: at
 # 15-45 s/call and 4 workers, 578k buildings is 25-75 days of wall clock.
