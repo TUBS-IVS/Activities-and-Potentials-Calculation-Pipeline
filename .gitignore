@@ -8,6 +8,17 @@ data/input/*
 data/output/*
 !data/output/.gitkeep
 
+# The LLM production run checkpoints here. The directory itself must survive a
+# fresh clone (06b/06c mkdir into it), so re-open the path far enough to keep
+# .gitkeep addable — the predictions themselves stay ignored.
+# NOTE: the BENCHMARK checkpoints do NOT live here; they are tracked under
+# data/validation/ (see config.llm_validation_checkpoint) because 1,391 rows of
+# predictions are the expensive artifact this branch exists to produce, and the
+# 353 MB input they were derived from is not distributed.
+!data/output/llm_predictions/
+data/output/llm_predictions/*
+!data/output/llm_predictions/.gitkeep
+
 # ── Validation data ───────────────────────────────────────────────────────────
 # data/validation/ IS tracked — the annotation workbooks and the decoded ground
 # truth are small (< 250 KB each) and are the published benchmark. But the

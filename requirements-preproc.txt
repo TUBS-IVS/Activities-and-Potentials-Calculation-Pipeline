@@ -1,0 +1,17 @@
+# Extra dependencies for the PREPROCESSING notebooks (01-05) only.
+#   pip install -r requirements.txt -r requirements-preproc.txt
+#
+# Split out of requirements.txt deliberately. The validation benchmark
+# (notebooks 06b, 09, 10) reads a prebuilt GeoPackage and never touches the OSM
+# PBF path, so a fresh clone can install requirements.txt, run `pytest`, and
+# reproduce the rule-engine baseline without building pyrosm or installing a
+# system CLI. Only rerunning the production DAG needs what is below.
+
+pyrosm>=0.6           # reads the clipped OSM PBF in notebook 02
+
+# NOTE — system dependency for notebook 02 (OSM PBF clipping):
+# Notebook 02 calls `osmium extract` via subprocess — install the osmium-tool
+# CLI separately (this is a system package, not a pip package):
+#   Linux:  sudo apt install osmium-tool
+#   Mac:    brew install osmium-tool
+#   Windows/conda: conda install -c conda-forge osmium-tool

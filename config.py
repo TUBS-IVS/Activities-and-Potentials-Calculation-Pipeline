@@ -5,6 +5,7 @@ To adapt this pipeline to a new region, only edit the values in this file.
 All notebooks import their settings from here.
 """
 
+import os
 from pathlib import Path
 
 # ──────────────────────────────────────────────
@@ -68,7 +69,28 @@ VOLUMES_FILTERED_FILE     = OUTPUT_DIR / "01_building_volumes_filtered.gpkg"
 OSM_POIS_MODIFIED_FILE    = OUTPUT_DIR / "03_osm_pois_modified.gpkg"
 ENRICHED_BUILDINGS_FILE   = OUTPUT_DIR / "04_enriched_building_volume_data.gpkg"
 CONDENSED_BUILDINGS_FILE  = OUTPUT_DIR / "05_condensed_buildings_with_pois.gpkg"
-CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / "06_classified_buildings.gpkg"
+
+# ──────────────────────────────────────────────
+# CLASSIFIER ARM
+# ──────────────────────────────────────────────
+# Which classifier the PRODUCTION path (notebooks 06/06b+06c → 07 → 08) is
+# running. Purely a filename switch so the two arms cannot overwrite each other's
+# outputs; it changes no maths anywhere.
+#
+# 'rule' MUST reproduce the pre-existing filenames byte-for-byte — that is what
+# makes this addition inert for everything already published on this branch.
+#
+# Set it BEFORE `from config import *`. An env var alone is not enough from a
+# notebook: `import *` binds the resolved values into a long-lived kernel
+# namespace, so a kernel that already imported config keeps the previous arm's
+# paths. Notebooks 07 and 08 therefore set os.environ in their own first cell,
+# ahead of the import, and print every resolved path.
+CLASSIFIER_ARM = os.environ.get("CLASSIFIER_ARM", "rule")   # 'rule' | 'llm'
+_arm_suffix    = "" if CLASSIFIER_ARM == "rule" else f"_{CLASSIFIER_ARM}"
+
+# Suffix goes INSIDE the stem — never after the extension, or GDAL infers the
+# driver from ".gpkg_llm" and fails.
+CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / f"06_classified_buildings{_arm_suffix}.gpkg"
 
 # --- Buildings the validation sample was drawn from (notebook 10) ---
 # The condensed dataset whose rows the annotated workbook indexes into.
@@ -86,10 +108,10 @@ VALIDATION_BUILDINGS_FILE = (
     ROOT.parent / "Capacity_Calculation-pipeline-original" / "Areas-of-interest-POIs"
     / "condensed_buildings_with_pois.gpkg"
 )
-REDISTRIBUTION_FILE       = OUTPUT_DIR / "07_building_level_redistributed.gpkg"
-REDISTRIBUTION_VALIDATION = OUTPUT_DIR / "07_redistribution_validation.csv"
-REDISTRIBUTION_LOG        = OUTPUT_DIR / "07_redistribution_allocation_log.csv"
-FINAL_RESULTS_FILE        = OUTPUT_DIR / "08_final_results.gpkg"
+REDISTRIBUTION_FILE       = OUTPUT_DIR / f"07_building_level_redistributed{_arm_suffix}.gpkg"
+REDISTRIBUTION_VALIDATION = OUTPUT_DIR / f"07_redistribution_validation{_arm_suffix}.csv"
+REDISTRIBUTION_LOG        = OUTPUT_DIR / f"07_redistribution_allocation_log{_arm_suffix}.csv"
+FINAL_RESULTS_FILE        = OUTPUT_DIR / f"08_final_results{_arm_suffix}.gpkg"
 
 # --- Manual validation (notebooks 09 & 10) ---
 VALIDATION_DIR            = ROOT / "data" / "validation"
@@ -97,8 +119,55 @@ VALIDATION_DIR            = ROOT / "data" / "validation"
 # validator's verdict encoded as a cell fill colour. See notebook 09.
 VALIDATION_SOURCE_FILE    = VALIDATION_DIR / "sample_version_1_balanced.xlsx"
 VALIDATION_GROUND_TRUTH   = VALIDATION_DIR / "09_ground_truth.parquet"
+
+# PUBLISHED RULE-ENGINE BASELINE — FROZEN. Read for regression comparison; never
+# written again. Notebook 10 writes per-arm files via score_paths() instead, so a
+# rerun can never clobber the numbers the README quotes.
 VALIDATION_SCORE_DETAIL   = VALIDATION_DIR / "10_score_detail.csv"
 VALIDATION_SCORE_SUMMARY  = VALIDATION_DIR / "10_score_summary.csv"
+
+
+def score_paths(arm):
+    """(detail, summary) CSV paths for one scoring arm.
+
+    A function, not a template string: these are pathlib.Path objects and Path
+    has no .format(), so a `_TMPL` constant would have to be a str and every
+    caller would have to remember to re-wrap it.
+    """
+    return (VALIDATION_DIR / f"10_score_detail_{arm}.csv",
+            VALIDATION_DIR / f"10_score_summary_{arm}.csv")
+
+
+# One tidy table, all arms and subsets, written by notebook 10. This is the
+# head-to-head result.
+VALIDATION_SCORE_COMPARISON = VALIDATION_DIR / "10_score_comparison.csv"
+
+# Rule-engine-only metrics that are meaningless for an open-vocabulary model
+# (e.g. truth_not_producible, which counts truths the rule tables cannot emit).
+# Kept OUT of the comparison table so a 870-row rule figure can never be pasted
+# next to an 874-row LLM figure.
+VALIDATION_RULE_DIAGNOSTICS = VALIDATION_DIR / "10_rule_diagnostics.csv"
+
+
+def llm_validation_checkpoint(arm, run=1):
+    """Benchmark predictions for one (evidence arm, repeat) — TRACKED in git.
+
+    Deliberately NOT under data/output/llm_predictions/, which is gitignored.
+    These 1,391 rows are the expensive artifact this branch exists to produce and
+    the 353 MB input they came from is not distributed, so they must be
+    committable. A few hundred KB of parquet.
+
+    Separate from LLM_CHECKPOINT_FILE by necessity, not tidiness: the benchmark
+    (frozen file) and any production run (regenerated file) draw gml_ids from the
+    same small-integer namespace while describing DIFFERENT buildings. One
+    checkpoint deduped on gml_id would interleave them undetectably.
+    """
+    return VALIDATION_DIR / f"06b_llm_predictions_{arm}_run{run}.parquet"
+
+
+def llm_validation_errors(arm, run=1):
+    """Rows that failed after every retry. Must reach zero — see notebook 06b."""
+    return VALIDATION_DIR / f"06b_llm_errors_{arm}_run{run}.parquet"
 
 # Fill colours used by the validator, as ARGB hex (openpyxl reports them this
 # way). These are Excel's standard green/red/yellow conditional-format fills.
@@ -215,6 +284,62 @@ LABELS_TO_REMOVE = [
     "Windmill",
     "ski jump (inrun)",
 ]
+
+# ──────────────────────────────────────────────
+# LLM API SETTINGS  (notebook 06b, llm_utils.py, scripts/llm_smoke_test.py)
+# ──────────────────────────────────────────────
+# The token is read from .env (see .env.example) as TU_KI_TOOLBOX_TOKEN and is
+# resolved lazily at call time inside llm_utils.call_tu_llm — NOT at import — so
+# `import llm_utils` works on a machine without credentials (pytest, CI, a fresh
+# clone verifying its imports).
+
+LLM_API_URL        = "https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send"
+LLM_MODEL          = "gpt-oss-120b"
+LLM_REASONING      = "high"       # "low", "medium", or "high"
+LLM_MAX_RETRIES    = 3
+LLM_BACKOFF_SEC    = 2.0
+LLM_TIMEOUT_SEC    = 120
+LLM_MAX_WORKERS    = 4            # ThreadPoolExecutor parallelism.
+                                  # The KI-Toolbox concurrency ceiling is
+                                  # undocumented and the retry path treats HTTP
+                                  # 429 exactly like a network error, with a
+                                  # 2/4/6 s linear backoff that is far too short
+                                  # for a rate limit. Ask the operators before
+                                  # raising this.
+LLM_CHUNK_SIZE     = 50           # rows per checkpoint flush
+
+# --- Production run only (the full condensed file). Left wired but unrun: at
+# 15-45 s/call and 4 workers, 578k buildings is 25-75 days of wall clock.
+# The benchmark uses llm_validation_checkpoint() instead — see above. ---
+LLM_PREDICTIONS_DIR       = OUTPUT_DIR / "llm_predictions"
+LLM_CHECKPOINT_FILE       = LLM_PREDICTIONS_DIR / "predictions_checkpoint.parquet"
+LLM_ERRORS_FILE           = LLM_PREDICTIONS_DIR / "prediction_errors.parquet"
+
+# ──────────────────────────────────────────────
+# EVIDENCE TIER  (notebook 10)
+# ──────────────────────────────────────────────
+# ALKIS function codes that say "some commercial building" without saying which
+# kind. Used to grade how much evidence a building carried, INDEPENDENTLY of
+# which classifier looked at it — the old tiering keyed off the rule engine's own
+# decision-layer names, which an LLM never emits, so every LLM row landed in a
+# bucket that silently lied.
+#
+# Labels below are the codelist's own `label_en` text, verified against
+# data/reference/building_function_codelist.csv (all 7 present). Validate any
+# edit the same way — an invented code is a silent no-op, exactly like the
+# LABELS_TO_REMOVE bug documented above:
+#     python -c "import pandas as pd, config as c; \
+#       cl=pd.read_csv(c.BUILDING_FUNCTION_CODELIST, encoding='utf-8', encoding_errors='replace'); \
+#       print('bogus:', sorted(c.GENERIC_COMMERCIAL - set(cl['function'].astype(str))))"
+GENERIC_COMMERCIAL = {
+    "31001_1120",   # Residential buildings with trade and services
+    "31001_1130",   # Residential buildings with commercial and industrial properties
+    "31001_2000",   # Buildings for business or commerce
+    "31001_2010",   # Buildings for trade and services
+    "31001_2100",   # Commercial and industrial buildings
+    "31001_2310",   # Building for trade and services with housing
+    "31001_2320",   # Commercial and industrial buildings with residential areas
+}
 
 # ──────────────────────────────────────────────
 # ACTIVITY LABEL TAXONOMY

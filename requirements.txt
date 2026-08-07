@@ -5,7 +5,6 @@ geopandas>=1.0
 pyogrio>=0.7          # GeoPackage / vector I/O engine used by geopandas
 shapely>=2.0
 pyproj>=3.5
-pyrosm>=0.6           # reads the clipped OSM PBF in notebook 02
 
 # --- Data ---
 pandas>=2.0
@@ -13,15 +12,18 @@ numpy>=1.24
 pyarrow>=14.0         # parquet engine — notebook 09 writes and 10 reads the ground truth
 openpyxl>=3.1         # reads the colour-coded annotation workbook in notebook 09
 
+# --- LLM stage (notebook 06b, llm_utils.py, scripts/llm_smoke_test.py) ---
+requests>=2.31        # streaming POST to the KI-Toolbox chat endpoint
+python-dotenv>=1.0    # loads TU_KI_TOOLBOX_TOKEN from .env
+
 # --- Notebooks ---
 jupyterlab>=4.0
 
 # --- Tests ---
 pytest>=7.4
 
-# NOTE — system dependency for notebook 02 (OSM PBF clipping):
-# Notebook 02 calls `osmium extract` via subprocess — install the osmium-tool
-# CLI separately (this is a system package, not a pip package):
-#   Linux:  sudo apt install osmium-tool
-#   Mac:    brew install osmium-tool
-#   Windows/conda: conda install -c conda-forge osmium-tool
+# NOTE — preprocessing (notebooks 01-05) needs one more package and one system
+# tool, both split into requirements-preproc.txt. They are NOT required to run
+# the validation benchmark (notebooks 06b/09/10), which reads a prebuilt
+# GeoPackage, so keeping them out of this file lets a fresh clone install and
+# run the test suite without a fragile build.
