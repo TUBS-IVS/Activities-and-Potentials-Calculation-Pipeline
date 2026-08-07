@@ -10,110 +10,18 @@ Usage (from project root):
 
 import sys
 import argparse
-import json
-import os
-import time
-import requests
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-from config import (
-    CONDENSED_BUILDINGS_FILE, LLM_API_URL, LLM_MODEL, LLM_REASONING,
-    LLM_TIMEOUT_SEC, LLM_MAX_RETRIES, LLM_BACKOFF_SEC, TARGET_MID_LABELS,
-)
-from llm_utils import row_to_llm_input, extract_first_json, validate as _validate
-
-
-def validate(obj):
-    _validate(obj, TARGET_MID_LABELS)
-
-load_dotenv(dotenv_path=ROOT / '.env')
-TU_TOKEN = os.getenv('TU_KI_TOOLBOX_TOKEN')
-if not TU_TOKEN:
-    raise RuntimeError('Missing TU_KI_TOOLBOX_TOKEN in .env')
-
-# ── System prompt (copy from NB06) ───────────────────────────────────────────
-
-SYSTEM_PROMPT = """
-You are a building activity interpreter and classifier.
-
-Your task is to classify BUILDINGS using structured input divided into TWO PARTS:
-1) precise_known_info — high-confidence OSM-derived signals such as names, amenity, shop, office, tourism, healthcare, leisure, etc.
-2) general_building_context — broader contextual signals such as ALKIS landuse, OSM building type, OSM landuse, auxiliary tags.
-
-You must produce TWO outputs:
-1) Activity labels (mid_labels) — what activities take place inside the building
-2) Bosserhof class — the dominant functional building-use class for capacity / volume estimation
-
-CRITICAL SCOPE RULE
-Only classify ENTERABLE BUILDINGS or building-like places people actually use as destinations.
-If the described place is not a building, not enterable, or only an outdoor / infrastructure / passive object:
-- "mid_labels": []
-- "bosserhof_class": null
-
-ALLOWED ACTIVITY LABELS (mid_labels):
-work, university, school, childcare, retail_daily, retail_non_daily, leisure, sports, errands, meetup, lessons, business
-
-OUTPUT FORMAT (STRICT JSON ONLY):
-{
-  "interpreted_type": "<plain-English description>",
-  "mid_labels": ["<zero or more labels from the allowed list>"],
-  "bosserhof_class": "<one Bosserhof class or null>",
-  "reason": "<max 400 words explaining both classifications>"
-}
-""".strip()
-
-
-def call_tu_llm(user_input):
-    headers = {'Authorization': f'Bearer {TU_TOKEN}', 'Accept': 'application/json',
-               'Content-Type': 'application/json'}
-    payload = {'thread': None, 'prompt': user_input, 'model': LLM_MODEL,
-               'customInstructions': SYSTEM_PROMPT, 'hideCustomInstructions': True,
-               'reasoning': {'effort': LLM_REASONING}}
-    last_err = None
-    for attempt in range(1, LLM_MAX_RETRIES + 1):
-        try:
-            r = requests.post(LLM_API_URL, headers=headers, json=payload,
-                              stream=True, timeout=LLM_TIMEOUT_SEC)
-            r.raise_for_status()
-            full_text = ''
-            for line in r.iter_lines(decode_unicode=True):
-                if not line: continue
-                try: event = json.loads(line)
-                except json.JSONDecodeError: continue
-                if event.get('type') == 'chunk':
-                    full_text += event.get('content', '')
-                elif event.get('type') == 'done':
-                    if 'response' in event: full_text = event['response']
-                    break
-            return full_text
-        except Exception as e:
-            last_err = e
-            time.sleep(LLM_BACKOFF_SEC * attempt)
-    raise RuntimeError(f'LLM failed after {LLM_MAX_RETRIES} attempts: {last_err}')
-
-def predict_row(gml_id, sentence):
-    gml_id = gml_id.item() if hasattr(gml_id, 'item') else gml_id
-    sentence = '' if sentence is None else str(sentence)
-    try:
-        raw = call_tu_llm(sentence)
-        obj = extract_first_json(raw)
-        validate(obj)
-        return {'gml_id': gml_id, 'sentence': sentence,
-                'interpreted_type': obj['interpreted_type'],
-                'mid_labels': obj['mid_labels'],
-                'bosserhof_class': obj['bosserhof_class'],
-                'reason': obj['reason'][:120] + '...' if len(obj.get('reason','')) > 120 else obj.get('reason',''),
-                'error': None}
-    except Exception as e:
-        return {'gml_id': gml_id, 'sentence': sentence,
-                'interpreted_type': 'ERROR', 'mid_labels': [], 'bosserhof_class': None,
-                'reason': None, 'error': str(e)}
+from config import LLM_MODEL, VALIDATION_BUILDINGS_FILE
+# Prompt, transport and per-row driver all come from llm_utils. This script used
+# to carry its own copies; the prompt had drifted (no Bosserhof taxonomy at all)
+# so a green smoke test said nothing about what notebook 06b would actually send.
+from llm_utils import SYSTEM_PROMPT, row_to_llm_input, predict_row
 
 # ── Sample selection ──────────────────────────────────────────────────────────
 
@@ -151,17 +59,28 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--n', type=int, default=10, help='Number of buildings to test')
     parser.add_argument('--workers', type=int, default=4, help='Parallel API workers')
+    parser.add_argument('--fields', choices=['full', 'blind'], default='full',
+                        help="'blind' drops osm_names/website/email, matching the "
+                             "evidence the rule engine is allowed to see")
     args = parser.parse_args()
 
-    print(f'Loading condensed buildings from {CONDENSED_BUILDINGS_FILE}...')
-    df = gpd.read_file(CONDENSED_BUILDINGS_FILE)
+    # The FROZEN benchmark file, not the regenerated CONDENSED_BUILDINGS_FILE.
+    # notebook 05 derives gml_id from a positional row index, so a regenerated
+    # file renumbers every building — smoke-testing against it would exercise
+    # rows that notebook 06b will never send.
+    if not VALIDATION_BUILDINGS_FILE.exists():
+        raise SystemExit(f'Benchmark buildings file not found:\n  {VALIDATION_BUILDINGS_FILE}\n'
+                         'See config.VALIDATION_BUILDINGS_FILE.')
+    print(f'Loading benchmark buildings from {VALIDATION_BUILDINGS_FILE}...')
+    df = gpd.read_file(VALIDATION_BUILDINGS_FILE)
     df = df.drop(columns=['geometry'])
-    print(f'Loaded {len(df):,} buildings. Picking {args.n} diverse samples...\n')
+    print(f'Loaded {len(df):,} buildings. Picking {args.n} diverse samples '
+          f'(fields={args.fields})...\n')
 
     sample = pick_sample(df, args.n)
     print(f'Selected {len(sample)} buildings across {len(set(b for b,_ in sample))} signal buckets:\n')
     for bucket, row in sample:
-        sentence = row_to_llm_input(row.to_dict())
+        sentence = row_to_llm_input(row.to_dict(), fields=args.fields)
         print(f'  [{bucket}] gml_id={row["gml_id"]}')
         print(f'    Input: {sentence[:120]}{"..." if len(sentence) > 120 else ""}')
     print()
@@ -173,7 +92,9 @@ def main():
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
             executor.submit(predict_row, row['gml_id'],
-                            row_to_llm_input(row.to_dict())): (bucket, row)
+                            row_to_llm_input(row.to_dict(), fields=args.fields),
+                            args.fields, VALIDATION_BUILDINGS_FILE.name,
+                            row.get('volume_m3')): (bucket, row)
             for bucket, row in tasks
         }
         for future in as_completed(futures):

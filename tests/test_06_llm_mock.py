@@ -1,7 +1,7 @@
 """
 test_06_llm_mock.py — LLM classification tests using real sampled rows + mock API.
 
-The fixture `tests/data/sample_condensed_buildings.parquet` contains 24 rows
+The fixture `tests/data/sample_condensed_buildings.parquet` contains 30 rows
 sampled from the real condensed buildings file across 8 signal buckets:
   school, kindergarten, restaurant, supermarket, hospital, office, named_only, sparse
 
@@ -10,7 +10,7 @@ sentence content, so these tests exercise the full pipeline
 (real data → sentence → mock LLM → extract → validate) on realistic inputs.
 
 To regenerate the sample fixture from fresh data:
-    python tests/create_llm_test_sample.py
+    python tests/create_classifier_test_sample.py
 """
 
 import json
@@ -75,7 +75,8 @@ def predict_row_with_mock(gml_id, sentence):
 @pytest.fixture(scope="module")
 def sample_df():
     if not SAMPLE_FILE.exists():
-        pytest.skip(f"Sample fixture not found: {SAMPLE_FILE}. Run tests/create_llm_test_sample.py first.")
+        pytest.skip(f"Sample fixture not found: {SAMPLE_FILE}. "
+                    "Run tests/create_classifier_test_sample.py first.")
     return pd.read_parquet(SAMPLE_FILE)
 
 @pytest.fixture(scope="module")
