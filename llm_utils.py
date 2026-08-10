@@ -125,34 +125,39 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 # which is the quantitative argument for choosing the LLM over the rules.
 
 # Identifying, business-specific evidence. Withheld by the "blind" ablation
-# because these are what rule_utils cannot use. An address identifies a specific
-# premises just as a name does, so it belongs in this set.
-_NAME_BEARING = {"osm_names", "website", "email", "alkis_address"}
+# because these are what rule_utils cannot use.
+_NAME_BEARING = {"osm_names", "website", "email"}
 
 _PRECISE_FIELDS = [("osm_names", "name"), ("amenity", "amenity"), ("building", "building"),
                    ("shop", "shop"), ("tourism", "tourism"), ("information", "information"),
-                   ("website", "website"), ("email", "email"),
-                   ("alkis_address", "address")]
+                   ("website", "website"), ("email", "email")]
 _GENERAL_FIELDS = [("label_en", "building_label"), ("osm_building_type", "osm_building_type"),
                    ("osm_landuse_class", "osm_landuse_class"), ("osm_landuse_name", "osm_landuse_name"),
                    ("gfk_class", "gfk_class"), ("ALKIS_Landuse_info", "alkis_landuse"),
-                   ("tags_search", "tags"), ("additional_information", "additional_info"),
-                   # Building size. Present on every benchmark building, spanning
-                   # 70 to 1,748,585 m3 (median 2,668) — an enormous dynamic range
-                   # and the single strongest physical cue available.
-                   #
-                   # It was previously withheld, which was a plain defect: the
-                   # Bosserhof class is by definition "the dominant functional
-                   # building-use class for CAPACITY / VOLUME estimation", and a
-                   # 200 m3 shop is not the same class as a 200,000 m3 one. The
-                   # human annotator had this column in front of them (workbook
-                   # column H), so withholding it also made the model answer a
-                   # harder question than the person defining the truth.
-                   #
-                   # rule_utils does not read volume when classifying, so this is
-                   # not something the rule engine loses by comparison — it is
-                   # evidence the preprocessing produced that nothing was using.
-                   ("volume_m3", "building_volume_m3")]
+                   ("tags_search", "tags"), ("additional_information", "additional_info")]
+
+# DELIBERATELY NOT SENT, and why:
+#
+#   gml_id         a bare row identifier; carries no information.
+#
+#   alkis_address  24% of values are the city alone ("Braunschweig, Stadt"),
+#                  and a street name adds little without a business name to
+#                  attach it to. Weak field.
+#
+#   volume_m3      genuinely informative — every building has one, spanning
+#                  70 to 1,748,585 m3, and the Bosserhof class is by definition
+#                  about capacity / volume estimation. The human annotator saw
+#                  it (workbook column H).
+#
+# Both are withheld to keep this run's field set IDENTICAL to the earlier run
+# that pre-filled the annotation workbook. That earlier run used the same model
+# (gpt-oss-120b) and these same 16 fields, so holding the inputs fixed makes
+# "does the model reproduce itself" answerable — any disagreement is the model,
+# not the prompt. Adding fields and measuring reproducibility at the same time
+# would confound the two.
+#
+# Revisit volume_m3 as a separate variant AFTER the reproducibility question is
+# settled; it is the most promising unused column the preprocessing produces.
 
 
 def is_missing(x):
