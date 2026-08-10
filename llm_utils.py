@@ -108,14 +108,21 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 # ──────────────────────────────────────────────────────────────────────────────
 # Which source columns become the prompt.
 #
-# "blind" exists because rule_utils.py says, verbatim:
+# "full" is the DEFAULT and the headline arm. Business names are the whole reason
+# to put an LLM on this problem: the model knows what "Deutsche Bank",
+# "Ernsting's family" or "Ilseder Landkrug" are, and no rule table can encode
+# that world knowledge.
+#
+# rule_utils.py says, verbatim:
 #     DELIBERATELY NOT USED: osm_names / any free-text business name. … That is
 #     the accepted limitation being measured here, not an oversight
-# 75.9% of scoreable buildings carry a name. Handing the LLM names the rule
-# engine is forbidden turns "LLM vs rules" into "with names vs without names",
-# which is a different question. The blind arm answers the first; the full arm
-# answers the second; running both and reporting the delta is the only way to
-# say which effect any headline number came from.
+# That is a limitation of the RULE ENGINE which the comparison exists to expose —
+# not a handicap the LLM should adopt so the contest looks even. Deciding which
+# classifier to deploy means letting each use what it can.
+#
+# "blind" withholds the same three fields, and is the ABLATION rather than the
+# fair fight: full - blind is exactly what business-name world knowledge buys,
+# which is the quantitative argument for choosing the LLM over the rules.
 
 _NAME_BEARING = {"osm_names", "website", "email"}
 
@@ -147,8 +154,8 @@ def format_value(x):
 def row_to_llm_input(row, fields="full"):
     """Render one building row as the user-side prompt.
 
-    fields="full"  — all 16 source columns (deployment arm)
-    fields="blind" — drops osm_names / website / email (method-comparison arm)
+    fields="full"  — all 16 source columns. THE headline arm; the default.
+    fields="blind" — drops osm_names / website / email. The names ablation.
 
     The body is otherwise untouched on purpose: this is the exact sentence
     contract the annotated run used. In particular the GeoPackage stores list
