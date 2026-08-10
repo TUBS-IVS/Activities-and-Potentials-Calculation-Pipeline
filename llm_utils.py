@@ -221,6 +221,26 @@ def row_to_llm_input(row, fields="full"):
 
 
 def extract_first_json(text):
+    # Parse the FIRST JSON object and ignore whatever follows it.
+    #
+    # The previous `re.search(r"\{.*\}", ..., DOTALL)` was greedy: it captured
+    # from the first "{" to the LAST "}" anywhere in the response. When the model
+    # emitted the object and then kept talking — a second object, or prose
+    # containing a brace — the captured span was two values glued together and
+    # json.loads rejected the lot with "Extra data: line 6 column 1". A complete,
+    # correct answer was thrown away because of what came after it.
+    #
+    # raw_decode stops at the end of the first well-formed value, so trailing
+    # content is simply ignored.
+    start = text.find("{")
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder(strict=False).raw_decode(text[start:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass   # fall through to the span-based attempt below
+
     m = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not m: raise ValueError("No JSON object found")
     # strict=False permits literal control characters (raw newlines, tabs) inside
