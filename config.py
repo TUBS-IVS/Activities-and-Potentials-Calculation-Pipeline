@@ -120,12 +120,6 @@ VALIDATION_DIR            = ROOT / "data" / "validation"
 VALIDATION_SOURCE_FILE    = VALIDATION_DIR / "sample_version_1_balanced.xlsx"
 VALIDATION_GROUND_TRUTH   = VALIDATION_DIR / "09_ground_truth.parquet"
 
-# PUBLISHED RULE-ENGINE BASELINE — FROZEN. Read for regression comparison; never
-# written again. Notebook 10 writes per-arm files via score_paths() instead, so a
-# rerun can never clobber the numbers the README quotes.
-VALIDATION_SCORE_DETAIL   = VALIDATION_DIR / "10_score_detail.csv"
-VALIDATION_SCORE_SUMMARY  = VALIDATION_DIR / "10_score_summary.csv"
-
 
 def score_paths(arm):
     """(detail, summary) CSV paths for one scoring arm.

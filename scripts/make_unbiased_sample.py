@@ -1,5 +1,5 @@
 """
-make_blind_sample.py — Build a BLIND annotation workbook.
+make_unbiased_sample.py — Build a BLIND annotation workbook.
 
 Why this exists
 ---------------
@@ -25,21 +25,21 @@ visible. That is what this script produces.
 
 Outputs
 -------
-data/validation/blind_sample_v1.xlsx      -> give this to the annotator
+data/validation/unbiased_sample_v1.xlsx      -> give this to the annotator
     Sheet "annotate"  : evidence + empty answer columns, randomised row order,
-                        opaque blind_id (no gml_id, so the old workbook cannot
+                        opaque row_id (no gml_id, so the old workbook cannot
                         be looked up)
     Sheet "vocabulary": the 7 activities and 47 Bosserhof classes, verbatim
     Sheet "how_to"    : instructions, including how to say "no activity"
 
-data/validation/blind_sample_v1_key.parquet -> DO NOT OPEN BEFORE ANNOTATING
-    blind_id -> gml_id, plus both classifiers' predictions, held back for scoring.
+data/validation/unbiased_sample_v1_key.parquet -> DO NOT OPEN BEFORE ANNOTATING
+    row_id -> gml_id, plus both classifiers' predictions, held back for scoring.
 
 Reproducible: fixed seed, stratified by evidence tier so the sample is not
 dominated by easy POI-tagged buildings.
 
 Usage:
-    python scripts/make_blind_sample.py [--n 200] [--seed 20260810]
+    python scripts/make_unbiased_sample.py [--n 200] [--seed 20260810]
 """
 
 import argparse
@@ -61,11 +61,11 @@ from rule_utils import classify_building                       # noqa: E402
 from validation_utils import resolve_prediction_bosserhof      # noqa: E402
 from llm_utils import normalise_mid_labels                     # noqa: E402
 
-OUT_XLSX = VALIDATION_DIR / "blind_sample_v1.xlsx"
-OUT_KEY = VALIDATION_DIR / "blind_sample_v1_key.parquet"
+OUT_XLSX = VALIDATION_DIR / "unbiased_sample_v1.xlsx"
+OUT_KEY = VALIDATION_DIR / "unbiased_sample_v1_key.parquet"
 
 # Shown to the annotator. This is deliberately EVERYTHING known about the
-# building, including names: blindness here means "no classifier output", not
+# building, including names: the annotator sees everything about the building; what is withheld is classifier output, not
 # "less evidence". The truth is what is actually there, not what any one
 # classifier is permitted to see.
 EVIDENCE_COLUMNS = [
@@ -106,7 +106,7 @@ def main():
     # ── Sample frame: the 885 buildings BOTH arms already have predictions for.
     # Reusing them costs no API calls and, because these are also the rows the
     # biased workbook covers, it lets us measure the acceptance bias directly:
-    # blind truth vs workbook truth on the very same buildings.
+    # unbiased truth vs workbook truth on the very same buildings.
     truth = pd.read_parquet(VALIDATION_GROUND_TRUTH)
     truth["gml_id"] = truth["gml_id"].astype(str)
     frame_ids = set(truth.loc[truth.activities_scoreable | truth.bosserhof_scoreable,
@@ -141,18 +141,18 @@ def main():
     # ── Randomise row order and assign an OPAQUE id. gml_id is withheld so the
     # annotator cannot look a building up in the old workbook.
     sample = sample.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
-    sample.insert(0, "blind_id", [f"B{i:04d}" for i in range(1, len(sample) + 1)])
+    sample.insert(0, "row_id", [f"B{i:04d}" for i in range(1, len(sample) + 1)])
 
     # ── The key: withheld until annotation is finished.
     rule = pd.DataFrame([classify_building(r) for r in sample.to_dict("records")])
     rule["gml_id"] = rule["gml_id"].astype(str)
-    key = sample[["blind_id", "gml_id", "tier"]].merge(
+    key = sample[["row_id", "gml_id", "tier"]].merge(
         rule[["gml_id", "mid_labels", "bosserhof_class"]].rename(
             columns={"mid_labels": "rule_mid_labels",
                      "bosserhof_class": "rule_bosserhof"}),
         on="gml_id", how="left")
 
-    ck = llm_validation_checkpoint("blind", 1)
+    ck = llm_validation_checkpoint("full", 1)
     if ck.exists():
         llm = pd.read_parquet(ck)
         llm["gml_id"] = llm["gml_id"].astype(str)
@@ -170,7 +170,7 @@ def main():
     key.to_parquet(OUT_KEY, index=False)
 
     # ── The annotation sheet: evidence + EMPTY answer columns, nothing else.
-    sheet = sample[["blind_id"] + [c for c in EVIDENCE_COLUMNS if c in sample.columns]].copy()
+    sheet = sample[["row_id"] + [c for c in EVIDENCE_COLUMNS if c in sample.columns]].copy()
     sheet["activities"] = ""
     sheet["bosserhof_class"] = ""
     sheet["uncertain"] = ""
@@ -186,7 +186,7 @@ def main():
     # class, so evidence the annotator must see trips it. Too weak because a
     # leaked prediction under an innocuous column name would pass.
     ANSWER_COLS = {"activities", "bosserhof_class", "uncertain", "notes"}
-    allowed = set(fields) | {"blind_id"} | ANSWER_COLS
+    allowed = set(fields) | {"row_id"} | ANSWER_COLS
     foreign = [c for c in sheet.columns if c not in allowed]
     assert not foreign, (
         f"columns not present in {VALIDATION_BUILDINGS_FILE.name} reached the "
@@ -198,8 +198,8 @@ def main():
 
     assert (sheet["activities"] == "").all(), "activities column must ship empty"
     assert (sheet["bosserhof_class"] == "").all(), "bosserhof column must ship empty"
-    assert sheet["blind_id"].is_unique, "blind_id must be unique"
-    assert set(sheet["blind_id"]) == set(key["blind_id"]), "sheet and key disagree"
+    assert sheet["row_id"].is_unique, "row_id must be unique"
+    assert set(sheet["row_id"]) == set(key["row_id"]), "sheet and key disagree"
 
     vocab = pd.DataFrame({
         "activities (choose zero or more)":
@@ -237,7 +237,7 @@ def main():
         "NOTES — free text, optional. Useful when the vocabulary has no good fit.",
         "",
         "Please do not add, delete, reorder or rename columns or rows —",
-        "blind_id is how answers are matched back to buildings.",
+        "row_id is how answers are matched back to buildings.",
     ]})
 
     with pd.ExcelWriter(OUT_XLSX, engine="openpyxl") as xl:
