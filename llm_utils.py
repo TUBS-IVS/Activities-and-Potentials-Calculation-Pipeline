@@ -124,15 +124,35 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 # fair fight: full - blind is exactly what business-name world knowledge buys,
 # which is the quantitative argument for choosing the LLM over the rules.
 
-_NAME_BEARING = {"osm_names", "website", "email"}
+# Identifying, business-specific evidence. Withheld by the "blind" ablation
+# because these are what rule_utils cannot use. An address identifies a specific
+# premises just as a name does, so it belongs in this set.
+_NAME_BEARING = {"osm_names", "website", "email", "alkis_address"}
 
 _PRECISE_FIELDS = [("osm_names", "name"), ("amenity", "amenity"), ("building", "building"),
                    ("shop", "shop"), ("tourism", "tourism"), ("information", "information"),
-                   ("website", "website"), ("email", "email")]
+                   ("website", "website"), ("email", "email"),
+                   ("alkis_address", "address")]
 _GENERAL_FIELDS = [("label_en", "building_label"), ("osm_building_type", "osm_building_type"),
                    ("osm_landuse_class", "osm_landuse_class"), ("osm_landuse_name", "osm_landuse_name"),
                    ("gfk_class", "gfk_class"), ("ALKIS_Landuse_info", "alkis_landuse"),
-                   ("tags_search", "tags"), ("additional_information", "additional_info")]
+                   ("tags_search", "tags"), ("additional_information", "additional_info"),
+                   # Building size. Present on every benchmark building, spanning
+                   # 70 to 1,748,585 m3 (median 2,668) — an enormous dynamic range
+                   # and the single strongest physical cue available.
+                   #
+                   # It was previously withheld, which was a plain defect: the
+                   # Bosserhof class is by definition "the dominant functional
+                   # building-use class for CAPACITY / VOLUME estimation", and a
+                   # 200 m3 shop is not the same class as a 200,000 m3 one. The
+                   # human annotator had this column in front of them (workbook
+                   # column H), so withholding it also made the model answer a
+                   # harder question than the person defining the truth.
+                   #
+                   # rule_utils does not read volume when classifying, so this is
+                   # not something the rule engine loses by comparison — it is
+                   # evidence the preprocessing produced that nothing was using.
+                   ("volume_m3", "building_volume_m3")]
 
 
 def is_missing(x):
@@ -171,7 +191,19 @@ def row_to_llm_input(row, fields="full"):
         for col, label in field_list:
             if col in drop:
                 continue
-            val = format_value(row.get(col))
+            raw = row.get(col)
+            if col == "volume_m3":
+                # Round: the raw value carries 12 decimal places of false
+                # precision ("1554.252340847505"), which is noise in the prompt
+                # and costs tokens for nothing.
+                if is_missing(raw):
+                    continue
+                try:
+                    bits.append(f"{label}={round(float(raw)):,}")
+                except (TypeError, ValueError):
+                    pass
+                continue
+            val = format_value(raw)
             if val: bits.append(f"{label}={val}")
         return bits
 
