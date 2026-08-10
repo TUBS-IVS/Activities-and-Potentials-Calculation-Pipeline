@@ -72,8 +72,23 @@ A regenerated file joins cleanly and compares unrelated buildings. So the benchm
 reads the frozen file, which lives **outside this repo** and is not distributed.
 Notebook 10 refuses to score if the volumes disagree.
 
-*Fix for the future: keep the real ALKIS `gml_id` instead of overwriting it, and mint
-content-based ids for OSM-added rows.*
+**Fixed going forward.** Notebook 05 now keeps the original register id in a second
+column instead of discarding it, and carries it through 06 → 07 → 08:
+
+| column | what it is | stable across runs? |
+|---|---|---|
+| `gml_id` | positional row index, needed for the POI join | ❌ no |
+| `source_gml_id` | ALKIS `DENILD01000002A1`, or `osm_<id>` for gap-fill rows | ✅ yes |
+
+Use `source_gml_id` for anything leaving the pipeline. In `08_final_results.gpkg` it
+resolves back to ALKIS for **281,000 of 282,017** buildings — 100% of the ALKIS-sourced
+ones, the other 1,017 being OSM-only rows that carry an OSM id instead — verified by
+`volume_m3` agreement, not by match rate. Notebook 05 asserts the mapping stays a
+bijection, so a later edit cannot quietly sever it.
+
+Note the two id columns are additive: `gml_id` values are byte-identical to before, so
+nothing downstream shifted. This does **not** retrofit the benchmark, which still reads
+the frozen file — that file predates the change and has no `source_gml_id`.
 
 **2. The annotation workbook was seeded by an earlier LLM run.**
 
