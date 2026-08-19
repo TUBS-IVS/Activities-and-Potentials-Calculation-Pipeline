@@ -70,29 +70,7 @@ OSM_POIS_MODIFIED_FILE    = OUTPUT_DIR / "03_osm_pois_modified.gpkg"
 ENRICHED_BUILDINGS_FILE   = OUTPUT_DIR / "04_enriched_building_volume_data.gpkg"
 CONDENSED_BUILDINGS_FILE  = OUTPUT_DIR / "05_condensed_buildings_with_pois.gpkg"
 
-# ──────────────────────────────────────────────
-# CLASSIFIER ARM
-# ──────────────────────────────────────────────
-# Which classifier the PRODUCTION path (notebooks 06/06b+06c → 07 → 08) is
-# running. Purely a filename switch so the two arms cannot overwrite each other's
-# outputs; it changes no maths anywhere.
-#
-# 'rule' MUST reproduce the pre-existing filenames byte-for-byte — that is what
-# makes this addition inert for everything already published on this branch.
-#
-# Set it BEFORE `from config import *`. An env var alone is not enough from a
-# notebook: `import *` binds the resolved values into a long-lived kernel
-# namespace, so a kernel that already imported config keeps the previous arm's
-# paths. Notebooks 07 and 08 therefore set os.environ in their own first cell,
-# ahead of the import, and print every resolved path.
-CLASSIFIER_ARM = os.environ.get("CLASSIFIER_ARM", "rule")   # 'rule' | 'llm'
-_arm_suffix    = "" if CLASSIFIER_ARM == "rule" else f"_{CLASSIFIER_ARM}"
-
-# Suffix goes INSIDE the stem — never after the extension, or GDAL infers the
-# driver from ".gpkg_llm" and fails.
-CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / f"06_classified_buildings{_arm_suffix}.gpkg"
-
-# --- Buildings the validation sample was drawn from (notebook 10) ---
+# --- Buildings the validation sample was drawn from (notebook 06) ---
 # The condensed dataset whose rows the annotated workbook indexes into.
 #
 # Needed because notebook 05 derives `gml_id` from the positional row index, which is
@@ -108,68 +86,82 @@ VALIDATION_BUILDINGS_FILE = (
     ROOT.parent / "Capacity_Calculation-pipeline-original" / "Areas-of-interest-POIs"
     / "condensed_buildings_with_pois.gpkg"
 )
-REDISTRIBUTION_FILE       = OUTPUT_DIR / f"07_building_level_redistributed{_arm_suffix}.gpkg"
-REDISTRIBUTION_VALIDATION = OUTPUT_DIR / f"07_redistribution_validation{_arm_suffix}.csv"
-REDISTRIBUTION_LOG        = OUTPUT_DIR / f"07_redistribution_allocation_log{_arm_suffix}.csv"
-FINAL_RESULTS_FILE        = OUTPUT_DIR / f"08_final_results{_arm_suffix}.gpkg"
 
-# --- Manual validation (notebooks 09 & 10) ---
+# --- Validation benchmark (notebooks 06 - 10) ---
 VALIDATION_DIR            = ROOT / "data" / "validation"
-# Hand-annotated workbook: an earlier classification run's predictions with the
-# validator's verdict encoded as a cell fill colour. See notebook 09.
-VALIDATION_SOURCE_FILE    = VALIDATION_DIR / "sample_version_1_balanced.xlsx"
-VALIDATION_GROUND_TRUTH   = VALIDATION_DIR / "09_ground_truth.parquet"
+
+# Hand-annotated workbook — THE irreplaceable input of this branch. An earlier
+# classification run's predictions with the validator's verdict encoded as a cell
+# fill colour: green = prediction accepted, red = corrected value typed in the
+# neighbouring cell. Everything else under data/validation/ is derived from it by
+# notebook 06 and can be regenerated; this file cannot.
+VALIDATION_SOURCE_FILE    = VALIDATION_DIR / "sample_version_1.xlsx"
+
+# Notebook 06 output: the workbook decoded, joined to the frozen building file for
+# its evidence text, and given a run-stable `source_gml_id`. This ONE file is the
+# input to every notebook after it.
+VALIDATION_SET_FILE       = VALIDATION_DIR / "06_validation_set.csv"
+
+# Per-arm predictions (notebooks 07 / 08) and the side-by-side review sheets they
+# write. `arm` is 'rule' or 'llm'.
+def arm_predictions(arm):
+    return VALIDATION_DIR / f"{arm}_predictions.parquet"
 
 
-def score_paths(arm):
-    """(detail, summary) CSV paths for one scoring arm.
-
-    A function, not a template string: these are pathlib.Path objects and Path
-    has no .format(), so a `_TMPL` constant would have to be a str and every
-    caller would have to remember to re-wrap it.
-    """
-    return (VALIDATION_DIR / f"10_score_detail_{arm}.csv",
-            VALIDATION_DIR / f"10_score_summary_{arm}.csv")
+def arm_comparison(arm):
+    """Side-by-side sheet for manual review — see validation_utils.build_comparison."""
+    return VALIDATION_DIR / f"{arm}_comparison.csv"
 
 
-# One tidy table, all arms and subsets, written by notebook 10. This is the
-# head-to-head result.
-VALIDATION_SCORE_COMPARISON = VALIDATION_DIR / "10_score_comparison.csv"
+# Notebook 10: N repeats of the LLM on the same rows, to measure reproducibility.
+LLM_REPRO_PREDICTIONS     = VALIDATION_DIR / "llm_repeat_predictions.parquet"
+LLM_REPRO_COMPARISON      = VALIDATION_DIR / "llm_repeat_comparison.csv"
+LLM_REPRO_RUNS            = 5     # how many times notebook 10 re-classifies each row
 
-# Rule-engine-only metrics that are meaningless for an open-vocabulary model
-# (e.g. truth_not_producible, which counts truths the rule tables cannot emit).
-# Kept OUT of the comparison table so a 870-row rule figure can never be pasted
-# next to an 874-row LLM figure.
-VALIDATION_RULE_DIAGNOSTICS = VALIDATION_DIR / "10_rule_diagnostics.csv"
-
-
-def llm_validation_checkpoint(arm, run=1):
-    """Benchmark predictions for one (evidence arm, repeat) — TRACKED in git.
-
-    Deliberately NOT under data/output/llm_predictions/, which is gitignored.
-    These 1,391 rows are the expensive artifact this branch exists to produce and
-    the 353 MB input they came from is not distributed, so they must be
-    committable. A few hundred KB of parquet.
-
-    Separate from LLM_CHECKPOINT_FILE by necessity, not tidiness: the benchmark
-    (frozen file) and any production run (regenerated file) draw gml_ids from the
-    same small-integer namespace while describing DIFFERENT buildings. One
-    checkpoint deduped on gml_id would interleave them undetectably.
-    """
-    return VALIDATION_DIR / f"06b_llm_predictions_{arm}_run{run}.parquet"
-
-
-def llm_validation_errors(arm, run=1):
-    """Rows that failed after every retry. Must reach zero — see notebook 06b."""
-    return VALIDATION_DIR / f"06b_llm_errors_{arm}_run{run}.parquet"
+# Notebook 11: the two hand-reviewed workbooks and the final result sheet.
+#
+# `bosserhof_truth` is not a verified label — on a green row it is whatever was
+# pre-filled, accepted without being re-derived (see VALIDATION_COLOURS below). So
+# every building where the repeats did NOT reproduce it was reviewed by hand, split
+# into two files by how the runs behaved. Together they cover exactly the buildings
+# that are not 5/5 matches, and the verdict in both is the fill colour of the
+# `boss_modal` / `verdict` cell — i.e. a judgement on the MAJORITY answer, not on
+# any single run.
+LLM_REPRO_REVIEW_NEVER    = VALIDATION_DIR / "11_repro_review_never.xlsx"      # 0 of 5 matched
+LLM_REPRO_REVIEW_PARTIAL  = VALIDATION_DIR / "11_repro_review_remaining.xlsx"  # 1-4 of 5 matched
+LLM_REPRO_FINAL           = VALIDATION_DIR / "11_accuracy_results.xlsx"        # notebook 11 output
 
 # Fill colours used by the validator, as ARGB hex (openpyxl reports them this
 # way). These are Excel's standard green/red/yellow conditional-format fills.
+#
+# The VALUES are the colour names, not an interpretation of them, because that is
+# what notebook 06 writes into the `*_mistakes_color` columns and what
+# validation_utils.decode_final_validation_set reads back. Naming them
+# "correct"/"error" instead was a real bug: the decoder tests for 'green'/'red',
+# so every row silently failed the verdict filter and the validation set came out
+# with 0 rows — no exception, just an empty file.
 VALIDATION_COLOURS = {
-    "FFC6EFCE": "correct",     # green  — prediction accepted as-is
-    "FFFFC7CE": "error",       # red    — wrong; corrected value typed in the cell
-    "FFFFEB9C": "uncertain",   # yellow — validator could not decide; excluded
+    "FFC6EFCE": "green",    # prediction accepted as-is
+    "FFFFC7CE": "red",      # wrong; the corrected value is typed in the next cell
+    "FFFFEB9C": "yellow",   # validator could not decide — not scoreable
 }
+
+# Fill colours in notebook 11's REVIEW workbooks. Deliberately a separate map:
+# those files were coloured by hand from Excel's standard palette, not with the pale
+# conditional-format fills above, so no hex is shared between the two maps. Decoding
+# one with the other yields "unrecognised" for every row — which is why the reader
+# asserts on an unknown fill instead of defaulting it to a verdict.
+LLM_REPRO_REVIEW_COLOURS = {
+    "FF92D050": "green",    # the model's majority answer is acceptable
+    "FF00B050": "green",    # second green shade used by hand
+    "FF00B0F0": "blue",     # also accepted as correct (reviewer's own note)
+    "FFFF0000": "red",      # the model's majority answer is wrong
+    "FFFFFF00": "yellow",   # reviewer unsure -> dropped from the score entirely
+}
+
+# How notebook 11 turns those colours into a score. Yellow is absent on purpose: an
+# unsure row has no verdict, and counting it either way would invent one.
+LLM_REPRO_VERDICT_IS_CORRECT = {"green": True, "blue": True, "red": False}
 
 # Free-text values the validator used to mean "this building hosts no activity"
 # (i.e. it is residential). These are a real, scoreable ground truth of "empty",
@@ -179,7 +171,7 @@ VALIDATION_NO_ACTIVITY_TERMS = {"living", "residential", "seems residential", "n
 # Misspelled activity names OBSERVED in this workbook's hand-typed corrections.
 # Without an entry the name matches nothing and the label is SILENTLY DROPPED from
 # the ground truth, which then penalises any classifier that predicted it correctly.
-# Exactly two such typos exist in sample_version_1_balanced.xlsx:
+# Exactly two such typos exist in sample_version_1.xlsx:
 #   gml_id 229408  row 584   "['Kindergarden', 'Leisure', 'Workers']"  -> lost Kindergarten
 #   gml_id 478921  row 1051  "['Workers', 'Leisue']"                   -> lost Leisure
 #
@@ -280,12 +272,11 @@ LABELS_TO_REMOVE = [
 ]
 
 # ──────────────────────────────────────────────
-# LLM API SETTINGS  (notebook 06b, llm_utils.py, scripts/llm_smoke_test.py)
+# LLM API SETTINGS  (notebooks 08 & 10, llm_utils.py)
 # ──────────────────────────────────────────────
-# The token is read from .env (see .env.example) as TU_KI_TOOLBOX_TOKEN and is
-# resolved lazily at call time inside llm_utils.call_tu_llm — NOT at import — so
-# `import llm_utils` works on a machine without credentials (pytest, CI, a fresh
-# clone verifying its imports).
+# The token is read from .env as TU_KI_TOOLBOX_TOKEN and is resolved lazily at call
+# time inside llm_utils.call_tu_llm — NOT at import — so `import llm_utils` works on
+# a machine without credentials (CI, a fresh clone verifying its imports).
 
 LLM_API_URL        = "https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send"
 LLM_MODEL          = "gpt-oss-120b"
@@ -306,6 +297,21 @@ LLM_MAX_WORKERS    = 1            # ThreadPoolExecutor parallelism.
                                   # that trips it retries into the same wall
                                   # three times and drops the row.
                                   # Raise only after asking the operators.
+# Notebooks 08 and 10 will not proceed with a missing prediction. After the main
+# pass they re-attempt every row that still has no answer, pausing longer before
+# each sweep, and assert at the end that nothing is left unclassified.
+#
+# These sweeps exist on top of call_tu_llm's own 3 retries because the two failure
+# modes are different. call_tu_llm retries within one call, seconds apart, which is
+# the wrong medicine for a rate limit — the undocumented KI-Toolbox limit rejects
+# requests made in quick succession, so three fast retries hit the same wall three
+# times and drop the row. A sweep comes back minutes later, when the limit has
+# reset. Sweeps also catch failures call_tu_llm cannot see at all: a malformed JSON
+# body arrives over a perfectly healthy HTTP 200, so the transport never errors and
+# never retries, and the row is simply lost (~0.1% of rows, observed).
+LLM_RETRY_SWEEPS   = 5            # extra passes over rows that still have no answer
+LLM_SWEEP_PAUSE_SEC = 30          # pause before sweep n is n * this, so 30s/60s/90s...
+
 LLM_CHUNK_SIZE     = 25           # rows per checkpoint flush.
                                   # Halved alongside the worker count: at one
                                   # request at a time a chunk is ~6-19 min, so
@@ -313,12 +319,6 @@ LLM_CHUNK_SIZE     = 25           # rows per checkpoint flush.
                                   # The file is a few hundred KB, so the extra
                                   # rewrites are free.
 
-# --- Production run only (the full condensed file). Left wired but unrun: at
-# 15-45 s/call and 4 workers, 578k buildings is 25-75 days of wall clock.
-# The benchmark uses llm_validation_checkpoint() instead — see above. ---
-LLM_PREDICTIONS_DIR       = OUTPUT_DIR / "llm_predictions"
-LLM_CHECKPOINT_FILE       = LLM_PREDICTIONS_DIR / "predictions_checkpoint.parquet"
-LLM_ERRORS_FILE           = LLM_PREDICTIONS_DIR / "prediction_errors.parquet"
 
 # ──────────────────────────────────────────────
 # EVIDENCE TIER  (notebook 10)

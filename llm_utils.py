@@ -2,18 +2,16 @@
 llm_utils.py — Shared helpers for LLM building classification.
 
 Imported by:
-  - notebooks/06b_llm_classification.ipynb   (the benchmark run)
-  - notebooks/06c_llm_to_classified.ipynb    (production adapter)
-  - tests/test_06_llm_mock.py
-  - scripts/llm_smoke_test.py
+  - notebooks/08_llm_validation.ipynb      (the benchmark run)
+  - notebooks/10_llm_reproducibility.ipynb (N repeats of the same rows)
 
 Edit here; nowhere else. That line was previously aspirational: the prompt, the
 HTTP transport and the per-row driver each existed in two or three drifted
-copies across the notebooks and the smoke test, and notebook 06 referenced a
+copies across the notebooks and a smoke test, and one notebook referenced a
 `predict_row` that was defined in none of them. They now live here, once.
 
 No credentials are needed to import this module. The API token is resolved
-inside call_tu_llm() at call time, so pytest and a fresh clone can import it.
+inside call_tu_llm() at call time, so a fresh clone can import it.
 """
 
 import json
@@ -567,15 +565,14 @@ def normalise_mid_labels(labels):
 def _token():
     """Resolve the API token at call time, never at import.
 
-    A module-scope `raise` would break `pytest tests/test_06_llm_mock.py` (which
-    imports this module) and any clean-clone import check on a machine with no
-    .env — neither of which makes a single API call.
+    A module-scope `raise` would break any clean-clone import check on a machine
+    with no .env, which does not make a single API call.
     """
     load_dotenv(dotenv_path=ROOT / ".env")
     tok = os.getenv("TU_KI_TOOLBOX_TOKEN")
     if not tok:
         raise RuntimeError(
-            "Missing TU_KI_TOOLBOX_TOKEN — copy .env.example to .env and add your token"
+            "Missing TU_KI_TOOLBOX_TOKEN — create a .env file containing it"
         )
     return tok
 
