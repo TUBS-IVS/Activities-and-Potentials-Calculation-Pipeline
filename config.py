@@ -351,3 +351,41 @@ ALKIS_OUTPUT_COLS = [
     "n_surfaces", "n_roof_faces", "dq_roof", "created_on", "plan_acquired_on",
     "geometry",
 ]
+
+# --- Step 03 second output: aggregated to real ALKIS buildings ----------------
+# The part-level layer above is the lossless one. This is the same data collapsed
+# to one row per ALKIS object (869,316 of them), because "a building" is what a
+# person means and what the POI join in step 04 mostly wants to reason about.
+#
+# Both are kept. Going part -> building is a groupby; going back is impossible,
+# which is why the part layer stays authoritative.
+#
+# How the collapse is done, and where it loses information:
+#   summed      volume_3d_m3, volume_old_m3, roof_area_m2, n_surfaces,
+#               n_roof_faces          - additive quantities, safe
+#   dissolved   geometry, and area_m2 recomputed FROM the dissolved shape rather
+#               than summed, so overlapping parts are not double counted
+#   largest     function, roof_shape, roof_type, address - taken from the part
+#               with the biggest ground area. Arbitrary when parts disagree,
+#               hence n_functions and functions_all below
+#   extremes    height_ridge_max_m, ground_z_min_m       - the building envelope
+#   worst       dq_roof_worst = max, so 6000 (estimated roof) on ANY part shows
+#
+# `n_functions` and `functions_all` exist so a mixed-use building is visible as
+# such instead of silently becoming whatever its largest part happens to be -
+# which matters directly for classification in step 04.
+ALKIS_BY_BUILDING_FILE = OUTPUT_DIR / "03_alkis_by_building.gpkg"
+
+ALKIS_BUILDING_COLS = [
+    "alkis_id",
+    "area_m2", "volume_3d_m3", "volume_old_m3", "volume_ratio",
+    "n_parts", "n_uuid", "is_multipart",
+    "function", "n_functions", "functions_all",
+    "roof_shape", "roof_type", "roof_area_m2",
+    "height_ridge_max_m", "height_ridge_wavg_m", "height_eaves_max_m",
+    "ground_z_min_m", "ridge_z_max_m",
+    "name", "ags", "city", "street", "house_number",
+    "n_surfaces", "n_roof_faces", "dq_roof_worst",
+    "created_on", "plan_acquired_on",
+    "geometry",
+]

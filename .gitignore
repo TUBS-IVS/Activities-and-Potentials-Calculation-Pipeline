@@ -12,6 +12,10 @@ data/output/*
 # by notebook 03, hundreds of MB, never an input to anything.
 data/experimental_extract/*
 !data/experimental_extract/.gitkeep
+
+# Reference tables are user-supplied region data, not code.
+data/reference/*
+!data/reference/.gitkeep
 !data/output/llm_predictions/
 data/output/llm_predictions/*
 !data/output/llm_predictions/.gitkeep
