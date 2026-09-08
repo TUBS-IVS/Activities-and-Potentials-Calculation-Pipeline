@@ -319,17 +319,31 @@ ALKIS_BUILDINGS_FILE = OUTPUT_DIR / "03_alkis_buildings.gpkg"
 # ELEVATIONS above sea level, not heights above the ground, so they become
 # `*_z_m`. measHeight really is a height above ground, so it becomes
 # `height_ridge_m` - and it is the ridge, not the eaves.
+# The naming convention, so every column reads on its own:
+#   height_*  metres ABOVE THE GROUND at this building
+#   elev_*    metres ABOVE SEA LEVEL
+#   top       the ridge - the highest line of the roof
+#   wall      the eaves - where the roof meets the wall
+#
+# "ridge" and "eaves" are roofing jargon and the AdV names hide the more
+# dangerous distinction: Firsthoehe/Traufhoehe/AbsHoehe are ABSOLUTE ELEVATIONS,
+# not heights, and this region spans 45-970 m of terrain, so confusing the two
+# is not a rounding error. measHeight really is a height above ground - and it
+# is measured to the RIDGE, which is the whole reason volume_old_m3 runs high.
 ALKIS_RENAME = {
-    "measHeight":  "height_ridge_m",
-    "Firsthoehe":  "ridge_z_m",
-    "Traufhoehe":  "eaves_z_m",
-    "AbsHoehe":    "ground_z_m",
+    "measHeight":  "height_top_m",       # ground -> highest point of the roof
+    "Firsthoehe":  "elev_top_m",         # highest point, above sea level
+    "Traufhoehe":  "elev_wall_top_m",    # top of the wall, above sea level
+    "AbsHoehe":    "elev_ground_m",      # the ground, above sea level
     "DachFlaech":  "roof_area_m2",
+    # NOT renamed and worth knowing: DachNeig is measured FROM THE VERTICAL, so
+    # a flat roof reads 90.0 rather than 0. Renaming would not stop that
+    # surprising someone, so it is documented instead.
     "DachNeig":    "roof_pitch_deg",
     "DachOri":     "roof_azimuth_deg",
-    "roofType":    "roof_type",
+    "roofType":    "roof_code",          # the numeric code; roof_shape is the name
     "DachName":    "roof_shape",
-    "DqDach":      "dq_roof",
+    "DqDach":      "roof_quality",       # 1000 = measured, 6000 = estimated roof
     "creationDa":  "created_on",
     "GrundrissA":  "plan_acquired_on",
     "Name":        "name",
@@ -343,12 +357,12 @@ ALKIS_RENAME = {
 ALKIS_OUTPUT_COLS = [
     "gml_id", "alkis_id",
     "area_m2", "volume_3d_m3", "volume_old_m3", "volume_ratio",
-    "height_ridge_m", "height_eaves_m",
-    "ground_z_m", "eaves_z_m", "ridge_z_m",
+    "height_top_m", "height_wall_m",
+    "elev_ground_m", "elev_wall_top_m", "elev_top_m",
     "function",
-    "roof_shape", "roof_type", "roof_area_m2", "roof_pitch_deg", "roof_azimuth_deg",
+    "roof_shape", "roof_code", "roof_area_m2", "roof_pitch_deg", "roof_azimuth_deg",
     "name", "ags", "city", "street", "house_number",
-    "n_surfaces", "n_roof_faces", "dq_roof", "created_on", "plan_acquired_on",
+    "n_surfaces", "n_roof_faces", "roof_quality", "created_on", "plan_acquired_on",
     "geometry",
 ]
 
@@ -381,11 +395,19 @@ ALKIS_BUILDING_COLS = [
     "area_m2", "volume_3d_m3", "volume_old_m3", "volume_ratio",
     "n_parts", "n_uuid", "is_multipart",
     "function", "n_functions", "functions_all",
-    "roof_shape", "roof_type", "roof_area_m2",
-    "height_ridge_max_m", "height_ridge_wavg_m", "height_eaves_max_m",
-    "ground_z_min_m", "ridge_z_max_m",
+    "roof_shape", "roof_code", "roof_area_m2",
+    "height_top_max_m", "height_top_avg_m", "height_wall_max_m",
+    "elev_ground_min_m", "elev_top_max_m",
     "name", "ags", "city", "street", "house_number",
-    "n_surfaces", "n_roof_faces", "dq_roof_worst",
+    "n_surfaces", "n_roof_faces", "roof_quality_worst",
     "created_on", "plan_acquired_on",
     "geometry",
 ]
+
+# `functions_all` is expected to be entirely NULL in this region and that is not
+# a fault: `function` is an attribute of the ALKIS OBJECT, so every LoD2 part of
+# a building inherits the same value and the parts can never disagree (measured:
+# 0 of 869,316). The column is kept as a cross-region guard - somewhere with
+# per-part functions would fill it - so it is exempted from the empty-column
+# check rather than dropped.
+ALKIS_ALLOW_EMPTY_COLS = ["functions_all"]
