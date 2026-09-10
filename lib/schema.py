@@ -80,16 +80,21 @@ def tidy_names(gdf):
     return gdf.rename(columns={c: c.replace(":", "_") for c in gdf.columns})
 
 
-def assert_no_empty_columns(gdf, name="frame"):
+def assert_no_empty_columns(gdf, name="frame", allow_empty=()):
     """Fail if a column was kept but holds nothing after filtering.
 
     A column that survives the keep-list but is entirely null is either a
     filtering mistake or a stale entry in the list. Either way the schema claims
     something the data does not have.
+
+    `allow_empty` names columns that are legitimately sparse: an audit column
+    such as `rescued_by` is empty in a region where no row needed rescuing, and
+    that is a fact about the region, not a schema mistake.
     """
     dead = [
         c for c in gdf.columns
-        if c != gdf.geometry.name and gdf[c].notna().sum() == 0
+        if c != gdf.geometry.name and c not in set(allow_empty)
+        and gdf[c].notna().sum() == 0
     ]
     if dead:
         raise AssertionError(f"{name}: columns kept but empty: {dead}")
