@@ -94,3 +94,75 @@ find the children needing imputation. Test the geometry type, not the area.
 - The share is dimensionless and computed within one building only, so m² is
   never compared against m³ across buildings. A building's total contribution to
   its zone is unchanged — only its internal activity ratio improves.
+
+## The reverse case: one site, many buildings
+
+**Status:** decided 2026-09-10. Not implemented; belongs to 04.5.
+
+A `site` POI is the mirror image of the nesting above: one OSM polygon (a
+school's grounds, a hospital, a campus, a riding centre) spanning several ALKIS
+buildings. The mapper drew the area to describe the whole facility, so the
+facility's activity happens in every building on it.
+
+Rule: **every building kept by 04.4 whose representative point lies inside the
+site polygon receives the site's use and name.** No size threshold here. The
+04.4 rescue uses one (`POI_SITE_RESCUE_MIN_AREA_M2`) because there the question
+is keep-or-drop; here the question is only who shares the demand, and the
+redistribution weights by volume. Measured after the 04.4 filter: 8,045 kept
+buildings lie inside a site, 7,207 of them with no POI of their own; 2,696 of
+those are under 50 m² and hold 0.3 % of the volume inside sites. The sheds
+receive the label and weigh nothing; the pending size rule on `31001_2000` may
+remove them anyway.
+
+Still open for 04.5, each with a proposed answer:
+
+- a building with its own point/footprint POI *and* a site around it keeps
+  both, as a list with the role marked, so the classification sees "school
+  site, café point" rather than one overwriting the other;
+- a site's demand is shared across its buildings by volume — the same weight
+  the redistribution uses, and the mirror of the area split above;
+- nested sites (a sports-centre site inside a campus site): attach both.
+
+## POIs that miss their building
+
+**Status:** decided 2026-09-10. Not implemented; belongs to 04.5.
+
+The 04.4 rescue is strict containment and stays that way: no buffer, no snap.
+The snap is an *assignment* device for 04.5, so that a café whose node was
+placed a few metres outside the wall still lands on its building instead of
+staying unassigned. Nothing gets rescued by it.
+
+Measured on the filtered layer (point and footprint POIs, 22,177):
+
+    inside a kept building                17,966
+    inside a dropped structure (canopy)      233   -> ignored by decision, not re-homed
+    outside every footprint                3,978   -> 3,369 have a kept building within 100 m, 609 none
+
+Most of the 3,978 are features that legitimately have no building - 659
+swimming pools, 185 attractions, 165 ruins, 139 graveyards, 128 information
+boards - and snapping them would hang a garden pool on the neighbour's house.
+So the snap applies only to **building-bound uses**, decided by the data rather
+than by a hand list: a `poi_use` is building-bound when at least 80 % of its
+POIs region-wide sit inside a footprint (133 uses: restaurant 95 %, supermarket
+97 %, hairdresser 95 %, doctors 95 %, cafe 91 %, ...). Uses under 50 %
+(swimming_pool 3 %, grave_yard 2 %, ruins 24 %, information 30 %, attraction
+31 %, public_bookcase 12 %, christian 24 %) are outdoor and are never snapped.
+
+Of the 1,024 outside POIs with a building-bound use, the distance to the
+nearest kept building is:
+
+    within   5 m     538   53 %
+    within  10 m     720   70 %
+    within  25 m     904   88 %
+    within  50 m     973   95 %
+    within 100 m   1,006   98 %
+    none            18
+
+**Radius: 50 m, decided 2026-09-10.** The previous pipeline used 100 m (its
+run: 14,256 inside, 1,921 snapped, 31 unmatched); beyond 50 m the nearest
+building is more likely the wrong one than the right one, and the extra 33
+POIs are not worth that. Rule 1 structures are never a
+snap target, and the 233 POIs inside them are ignored rather than re-homed
+(decided 2026-09-10): the petrol station's shop is a `31001_2130` building of
+its own, and a pharmacy whose node sits under its entrance canopy is judged by
+its building's class instead.
