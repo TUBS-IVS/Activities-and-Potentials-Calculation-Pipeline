@@ -85,6 +85,31 @@ ALL_BUILDINGS_OSM_FILE = OUTPUT_DIR / "01_all_buildings_osm.gpkg"
 #
 # `craft` is a filter key for the same reason: it was returning 54 rows as an
 # incidental column and returns 644 as a key.
+# ──────────────────────────────────────────────
+# STEP 01 — what is a POI candidate, and what is not
+# ──────────────────────────────────────────────
+# The extractor needs a POSITIVE list of keys - "everything except outdoor
+# things" is not expressible, because "everything" is the whole map. So the
+# principle "drop only what is clearly not a visitable interior" is applied in
+# two places: the keys below decide what enters the candidate set, and the
+# block-lists further down decide what leaves it. Audited 2026-09-11 against
+# every NAMED point or polygon in the region: 93,942 named features, 28,864 of
+# them (points/polygons) carrying none of the original 20 keys. Of those the
+# activity places were named buildings with a use tag (about 1,300), man_made
+# plants (189), industrial/commercial/retail land-use areas (402 named, many
+# more unnamed), stations (51) and power plants (37) - all added below. The
+# rest were bus stops (9,165), hydrants, field and place names, boundaries,
+# street names: POI_NOT_EXTRACTED records them so the decision is visible.
+#
+# Mappers use three schemes for the same business, and all three are read:
+#   1. a use tag (amenity/shop/office/...) on a node or on the building  -> POI_EXTRACT_FILTER
+#   2. a NAMED building with only building=<use>  (the Goslar scheme)     -> POI_EXTRACT_BY_VALUE + POI_BUILDING_ACTIVITY_TAGS
+#   3. an area drawn around the site (landuse=industrial, amenity=school) -> POI_EXTRACT_BY_VALUE, becomes a `site`
+# and whatever is named but fits none of them still reaches the ALKIS building
+# as `osm_twin_name` in step 04, as information for the LLM.
+# Lines (LineString, MultiLineString) are dropped at extraction, no exceptions.
+
+# Pass 1: keys that make a feature a candidate with ANY value.
 POI_EXTRACT_FILTER = {
     # the original six
     "amenity": True,
@@ -111,6 +136,60 @@ POI_EXTRACT_FILTER = {
     "trade": True,              #    19
     "school": True,             #     9
 }
+
+# Pass 2: keys that make a feature a candidate only with these VALUES. Added
+# 2026-09-11 after the audit. `building` is further restricted to NAMED
+# features by POI_BUILDING_ACTIVITY_TAGS below; the others count named or not -
+# an unnamed industrial estate still tells every building inside it where it
+# stands, and an unnamed sewage works is still a workplace.
+POI_EXTRACT_BY_VALUE = {
+    "building": [
+        "industrial", "commercial", "warehouse", "retail", "office", "manufacture",
+        "supermarket", "kiosk", "hotel", "school", "kindergarten", "university",
+        "college", "hospital", "fire_station", "government", "public", "civic",
+        "hall", "sports_centre", "sports_hall", "church", "community_centre",
+        "museum", "restaurant",
+    ],
+    "man_made": ["works", "wastewater_plant", "water_works"],   # plants and plant units: 189
+    "landuse": ["industrial", "commercial", "retail"],          # business parks, depots, estates - as sites
+    "railway": ["station", "halt"],                              # 51 station points, snap to the station building
+    "power": ["plant"],                                           # 37 power stations
+    "aeroway": ["terminal"],                                      # airport terminals
+}
+
+# A feature whose ONLY accepted key is `building` counts only when it is NAMED
+# and the value is one of these (the same list as above). An unnamed
+# building=industrial is just a hall - its use reaches the ALKIS building through
+# `osm_twin_tag` in step 04 anyway - and a named building=yes mixes data centres
+# with hunting huts (1,970 in the region), so it is information, not a POI.
+POI_BUILDING_ACTIVITY_TAGS = frozenset(POI_EXTRACT_BY_VALUE["building"])
+
+# Keys deliberately NOT extracted, with the reason and the region's count of
+# named point/polygon features carrying only them. Recorded so the choice can
+# be validated and revisited; the notebook asserts none of them is in a filter.
+POI_NOT_EXTRACTED = {
+    "public_transport": "bus and tram stops, platforms, stop positions - 9,165 named",
+    "emergency":        "hydrants, assembly points - 2,025 named",
+    "natural":          "landscape - 1,845 named",
+    "waterway":         "rivers, streams",
+    "place":            "settlement and locality names - 1,352 named",
+    "highway":          "street names, crossings, bus bays - 1,128 named",
+    "boundary":         "administrative areas - 789 named",
+    "barrier":          "gates, bollards, fences - 151 named",
+    "playground":       "equipment on playgrounds",
+    "advertising":      "billboards",
+    "telecom":          "street cabinets, exchanges",
+    "pipeline":         "infrastructure",
+    # keys that ARE extracted, but only with the values in POI_EXTRACT_BY_VALUE:
+    #   building  yes 1,970 / house 121 / apartments 73 / service 62 / hut 37 named: homes, huts, cabins, or nothing said
+    #   landuse   farmland 1,098 / forest / meadow / allotments / cemetery / residential / farmyard: no indoor activity;
+    #             farmyard stays out so barns are not rescued by the yard around them
+    #   man_made  monitoring_station 422 / adit / mineshaft / survey_point / bridge / tower / water_well: unstaffed
+    #   power     substation 167 / generator 83 (wind turbines) / pole: unstaffed
+    #   railway   tram_stop / stop / platform / signal_box / switch: outdoor
+    #   aeroway   runway / taxiway / hangar: not destinations
+}
+
 # Promotes a tag to a real column. `healthcare` and `club` are not in pyrosm's
 # tag configuration, so without this pyrosm falls back to `_basic_tags` for them
 # and the column never appears - which is why they must be listed in BOTH places
@@ -387,7 +466,9 @@ POI_USE_SOURCES = [
     "amenity", "shop", "office", "craft", "healthcare", "social_facility",
     "education", "university", "school", "government", "company", "trade",
     "industrial", "military", "tourism", "club", "sport", "religion",
-    "historic", "leisure", "building",
+    "historic", "leisure",
+    "man_made", "landuse", "railway", "power", "aeroway",   # pass-2 keys, 2026-09-11
+    "building",
 ]
 
 # ─────────────────────────────
@@ -512,15 +593,6 @@ ALKIS_DROP_CONSTANT_COLS = {
     "DqBoden":    "1300 - ground-surface quality flag, never varies",
     "Geom2DRef":  "3000 - 2D geometry reference code, never varies",
 }
-
-# --- Step 03.x (EXPERIMENTAL): ALKIS object outlines --------------------------
-# EXPERIMENTAL_DIR is defined in the PATHS block at the top of this file.
-
-# One polygon per ALKIS object (`externRef` tail), built by dissolving every
-# surface that belongs to it. Written as a shapefile because that is what was
-# asked for; note a shapefile caps each component file at 2 GB and truncates
-# field names to 10 characters, so the attributes below are kept short.
-ALKIS_OUTLINES_SHP = EXPERIMENTAL_DIR / "alkis_outlines.shp"
 
 # --- Step 03 output: the refined 2D building layer ----------------------------
 # One row per LoD2 PART (gml_id), not per ALKIS object. Chosen because every
@@ -1118,6 +1190,25 @@ POI_BUILDING_BOUND_MIN_INSIDE_SHARE = 0.5
 #                            to a business but carries no tag of its own.
 # Keyed by function code so a floor can be given to another class later.
 ALKIS_SIZE_FLOOR_M2 = {"31001_2000": 100.0}
+# The EVIDENCE BAND (decided 2026-09-11): at or above the floor but under this,
+# a building stays only if something speaks for it - a POI or site on it, an
+# activity tag on its OSM twin, or a name on the twin. (An ALKIS address was
+# tried too and rejected: it proves a mailbox, not an activity, and the LLM
+# cannot classify from it.) Above
+# the floor class 2000 still held 19,517 buildings with none of those (bare
+# 'yes' twin or no footprint): median height 7.2 m, so real premises, but 8.6 %
+# of the layer's volume with no usable information. The band under 200 m2
+# takes 12,598 of them (3.3 % of volume) and leaves the larger halls as
+# generic workplaces rather than shifting all worker demand onto what OSM
+# happens to know. Dropping all 19,517 was considered and rejected for that.
+ALKIS_SIZE_FLOOR_EVIDENCE_M2 = {"31001_2000": 200.0}
+# Used twice. Under the floor: a class-2000 building with such a twin goes with
+# list 1. In EVERY class and at EVERY size (added 2026-09-11): a building whose
+# OSM footprints are ALL of these tags goes unless a POI or site is on it - a
+# 150 m2 garage row coded 2000, a shed block coded industrial. Measured: 2,676
+# kept buildings carried such a twin on the first run, 2,561 of them with
+# nothing but structure footprints; 121 of those carry a POI (67 petrol
+# stations whose canopy ALKIS coded as the station) and stay.
 OSM_TWIN_STRUCTURE_TAGS = frozenset({"garage", "garages", "shed", "carport", "roof", "hut"})
 # The user's five, plus the public and activity tags the OSM lists already treat
 # as kept - the same kind of evidence.
