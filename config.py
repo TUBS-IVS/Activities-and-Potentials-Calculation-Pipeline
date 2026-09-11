@@ -1098,6 +1098,61 @@ POI_SNAP_MAX_DISTANCE_M = 50
 # garden pool cannot land on the neighbour's house and rescue it.
 POI_BUILDING_BOUND_MIN_INSIDE_SHARE = 0.5
 
+# --- Step 04.4, the size floor -------------------------------------------------
+# 31001_2000 'buildings for business or commerce' is 369,675 buildings with a
+# median footprint of 29 m2 and a median height of 2.9 m: garages and sheds by
+# the hundred thousand, with the region's workshops among them. No class list
+# separates them; size does, together with what OSM drew on top. Measured
+# 2026-09-11: OSM-confirmed garages are 22/36/54 m2 (quartiles), OSM-confirmed
+# commercial buildings 132/371/1,054 m2, and the 2000-coded buildings that carry
+# a POI have a median footprint of 210 m2. Decided with the user: floor at 100.
+#
+# At or above the floor everything stays. Below it the OSM TWIN - the OSM
+# footprint whose representative point falls in the ALKIS polygon - decides:
+#   OSM_TWIN_STRUCTURE_TAGS  goes outright, with list 1, before the POI placement
+#                            (a POI on a garage-tagged shed moves next door)
+#   OSM_TWIN_ACTIVITY_TAGS   stays - OSM says a business or public use is there
+#   anything else            bare 'yes', residential, farm, or no OSM footprint at
+#                            all: goes unless a POI or site is on it (list-2 rule).
+#                            This is what keeps the small building that belongs
+#                            to a business but carries no tag of its own.
+# Keyed by function code so a floor can be given to another class later.
+ALKIS_SIZE_FLOOR_M2 = {"31001_2000": 100.0}
+OSM_TWIN_STRUCTURE_TAGS = frozenset({"garage", "garages", "shed", "carport", "roof", "hut"})
+# The user's five, plus the public and activity tags the OSM lists already treat
+# as kept - the same kind of evidence.
+OSM_TWIN_ACTIVITY_TAGS = frozenset({
+    "commercial", "industrial", "warehouse", "retail", "office",
+    "manufacture", "supermarket", "kiosk", "hotel", "school", "kindergarten",
+    "hospital", "fire_station", "government", "public", "civic", "sports_centre",
+    "sports_hall", "church", "hall", "community_centre", "museum", "restaurant",
+})
+
+# --- Step 04.5: the POI join ----------------------------------------------------
+# Which POI is on which building, with the shares the redistribution needs. The
+# placement is the one 04.4 already made (inside, else snapped within
+# POI_SNAP_MAX_DISTANCE_M for building-bound uses); a site goes onto every kept
+# building whose representative point lies inside it, nested sites included.
+#
+# A parent whose use is in this set and whose units are placed is a CONTAINER:
+# it gets no pair and no share of its own, because Schloss-Arkaden is 128 shops,
+# not 128 shops plus a mall. Every other parent (a supermarket with a bakery
+# counter, a hotel with a restaurant, a town hall with offices) keeps a share
+# next to its units - it is the main activity there. Measured 2026-09-11: the
+# 608 building parents are mall 372 children, supermarket 153, hotel 54,
+# townhall 37, school 34; only `mall` is a pure container.
+POI_CONTAINER_USES = frozenset({"mall"})
+
+# The result of step 04. Three layers: `buildings` (one per kept building, with
+# n_pois / poi_main_use / poi_uses / poi_names / n_sites / site_uses /
+# site_names), `building_pois` (one per building-POI pair: how, parent context,
+# share_in_building, share_of_site, snap_m) and `pois_unassigned` (with the
+# reason). Nothing is trimmed here; the LLM-preparation notebook decides which
+# columns it needs.
+ENRICHED_BUILDINGS_FILE = OUTPUT_DIR / "04_buildings_enriched.gpkg"
+# One line per pair from the POI to the nearest point of its building, for QGIS.
+POI_ASSIGNMENTS_FILE = EXPERIMENTAL_DIR / "04_poi_assignments.gpkg"
+
 # The activity map's ONE remaining role in the drop, advisory only: a code whose
 # activities are a subset of this and which is in neither list is flagged by the
 # notebook, because in another region it is almost certainly a residential code
