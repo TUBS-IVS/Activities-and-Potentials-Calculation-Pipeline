@@ -1,7 +1,7 @@
 # Splitting a building's weight across nested POIs
 
-**Status:** design agreed 2026-09-09. Not implemented. Step 01 does not yet emit
-the columns this needs.
+**Status:** design agreed 2026-09-09. Step 01 emits the three columns since
+2026-09-11 (its section 8). The split itself is applied in 04.5, not yet written.
 
 Redistribution keeps the ALKIS/LOD2 **building volume as the weight**. This note
 covers only the *internal* question: when one building holds several POIs, how
@@ -63,7 +63,7 @@ Measured on `data/output/01_all_pois.gpkg` (34,144 POIs, 2026-09-09):
 those children (47 %) are bare points. Median area of a polygon child is 659 m²;
 median of the per-parent medians is 773 m².
 
-## What step 01 must emit
+## What step 01 emits
 
 - `poi_parent_id` — the `poi_id` of the smallest POI footprint containing this
   POI, else null. Smallest matters: a shop inside a mall inside a campus should
@@ -127,29 +127,37 @@ Still open for 04.5, each with a proposed answer:
 
 **Status:** decided 2026-09-10. Not implemented; belongs to 04.5.
 
-The 04.4 rescue is strict containment and stays that way: no buffer, no snap.
-The snap is an *assignment* device for 04.5, so that a café whose node was
-placed a few metres outside the wall still lands on its building instead of
-staying unassigned. Nothing gets rescued by it.
+Placement happens in 04.4 already, before list 2, and 04.5 must reuse
+it: a POI inside an actual building is placed there; a POI under a dropped
+structure or outside every footprint is placed on the nearest actual building
+within the snap radius, building-bound uses only. A café node a few metres
+outside a residential block's wall therefore saves that block, and is assigned
+to it later. (Revised 2026-09-11: an earlier version said the snap was for
+assignment only and that POIs under canopies were ignored - the user wants
+them on the actual building, and saving residential buildings is top priority.)
 
 Measured on the filtered layer (point and footprint POIs, 22,177):
 
     inside a kept building                17,966
-    inside a dropped structure (canopy)      233   -> ignored by decision, not re-homed
+    inside a dropped structure (canopy)      233   -> re-homed to the actual building next to it, building-bound uses only
     outside every footprint                3,978   -> 3,369 have a kept building within 100 m, 609 none
 
 Most of the 3,978 are features that legitimately have no building - 659
 swimming pools, 185 attractions, 165 ruins, 139 graveyards, 128 information
 boards - and snapping them would hang a garden pool on the neighbour's house.
 So the snap applies only to **building-bound uses**, decided by the data rather
-than by a hand list: a `poi_use` is building-bound when at least 80 % of its
-POIs region-wide sit inside a footprint (133 uses: restaurant 95 %, supermarket
-97 %, hairdresser 95 %, doctors 95 %, cafe 91 %, ...). Uses under 50 %
+than by a hand list: a `poi_use` is building-bound when at least 50 % of its
+POIs region-wide sit inside a footprint (`POI_BUILDING_BOUND_MIN_INSIDE_SHARE`;
+618 of 749 uses: restaurant 95 %, supermarket 97 %, hairdresser 95 %, doctors
+95 %, cafe 91 %, and also kindergarten 73 %, school 78 %, sports_centre 58 %,
+farm 58 %, whose node is often placed on the grounds). Uses under 50 %
 (swimming_pool 3 %, grave_yard 2 %, ruins 24 %, information 30 %, attraction
-31 %, public_bookcase 12 %, christian 24 %) are outdoor and are never snapped.
+31 %, public_bookcase 12 %, christian 24 %, horse_riding 43 %) are outdoor and
+are never snapped. Measured with the 50 % cut: 1,660 POIs snapped, median
+3 m, 90 % within 22 m; 329 buildings saved by a snapped POI.
 
-Of the 1,024 outside POIs with a building-bound use, the distance to the
-nearest kept building is:
+Of the 1,024 outside POIs with a building-bound use (measured at the earlier
+80 % cut), the distance to the nearest kept building is:
 
     within   5 m     538   53 %
     within  10 m     720   70 %
@@ -162,7 +170,5 @@ nearest kept building is:
 run: 14,256 inside, 1,921 snapped, 31 unmatched); beyond 50 m the nearest
 building is more likely the wrong one than the right one, and the extra 33
 POIs are not worth that. Rule 1 structures are never a
-snap target, and the 233 POIs inside them are ignored rather than re-homed
-(decided 2026-09-10): the petrol station's shop is a `31001_2130` building of
-its own, and a pharmacy whose node sits under its entrance canopy is judged by
-its building's class instead.
+snap target: a POI under a canopy goes to the nearest *actual* building, which
+for the canopy POIs is at most 21 m away and typically about a metre.

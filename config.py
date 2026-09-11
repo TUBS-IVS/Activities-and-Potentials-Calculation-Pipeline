@@ -391,21 +391,37 @@ POI_USE_SOURCES = [
 ]
 
 # ─────────────────────────────
-# STEP 01 — POI nesting  (DESIGNED, NOT IMPLEMENTED)
+# STEP 01 — POI nesting
 # ─────────────────────────────
-# 4,711 POIs sit inside another POI's footprint (1,625 parents) - a mall and its
-# tenants, a campus and its institutes. Redistribution needs to split the
-# building volume between them by floor area rather than evenly, which means
-# step 01 has to emit `poi_parent_id`, `poi_role = 'unit'` and `split_area_m2`.
+# 3,144 POIs (13.6 %) sit inside another POI's polygon: a mall and its 128 shop
+# units, a campus and its institutes. Downstream a building's volume is split
+# between its units by floor area rather than evenly, and a campus hands its
+# label to every building inside it - see docs/nested-poi-area-split.md. Step 01
+# therefore emits, per POI:
+#   poi_parent_id    the smallest non-unit POI polygon containing the POI's
+#                    representative point, other than itself (a shop in a mall on
+#                    a campus points at the mall; the mall points at the campus),
+#                    else null. 1,423 parents in this region.
+#   poi_role='unit'  when that parent carries a building=* tag - it IS one
+#                    building - and the child is a point or footprint. Children
+#                    of an area parent (campus, outlet village, zoo, holiday
+#                    park) keep their role; a site child stays a site. The tag
+#                    decides, not the parent's poi_role: Schloss-Arkaden is a
+#                    'site' by building count yet one building=retail.
+#   split_area_m2    units only. Own area for polygons; the median area of the
+#                    polygon siblings for points; the fallback below when no
+#                    sibling has an area, which makes the split even. Only ever
+#                    a SHARE within the parent - unit outlines span floors and
+#                    sum to 154 % of the Schloss-Arkaden footprint.
 #
-# The rule, the measurements behind it and the traps are written up in
-#     docs/nested-poi-area-split.md
-#
-# No constants are defined here yet on purpose: in this file a constant's
-# presence means some step actually reads it, and nothing reads these yet.
-# The one gotcha worth repeating here, because it is easy to trip over while
-# writing that code: POINTS CARRY `area_m2 = 0.0`, NOT NULL. A null check will
-# not find the children that need an imputed area - test the geometry type.
+# Indoor units are recognised by one of these tag KEYS with no building tag, and
+# they can never be parents: room outlines on different floors overlap in plan,
+# and without this a first-floor shop becomes the parent of the ground-floor
+# shop below it (549 wrong parents when measured). It must be the KEY - the
+# mall polygon itself carries surveillance=indoor as a value.
+POI_UNIT_TAG_KEYS = ("indoor", "level", "level:ref")
+# Points carry area_m2 = 0.0, not null, so the imputation tests geom_kind.
+POI_SPLIT_AREA_FALLBACK_M2 = 1.0
 
 # ──────────────────────────────────────────────
 # STEP 02 — ALKIS / LoD2 extraction
@@ -794,6 +810,9 @@ ALKIS_ACTIVITY_SEP = ";"
 # plus a `kept` flag, for class-by-class review in QGIS. The per-code summary
 # table is only printed in the notebook, not written.
 LABELLED_INSPECT_FILE = EXPERIMENTAL_DIR / "04_buildings_labelled.gpkg"
+# Output of 04.4: the same layer filtered down to what survives the two drop
+# lists - the file to open when the question is "what is left?".
+KEPT_INSPECT_FILE = EXPERIMENTAL_DIR / "04_buildings_kept.gpkg"
 
 # --- Step 04.3: fill the gaps in ALKIS with OSM footprints --------------------
 # ALKIS/LoD2 is the authoritative building stock, but it is not complete: OSM
@@ -861,135 +880,234 @@ OSM_GAP_EXPECTED_SHARE_PCT = (5.0, 15.0)
 #   decides how to weight a building without a volume, these rows carry ZERO
 #   weight in a volume-proportional redistribution - they are on the map, not
 #   yet in the model.
-#   activities is NULL and function is 'OSM', so none of the 04.4 drop rules can
-#   judge them and they all pass through. 3,088 are tagged `house` and 531 `apartments`; an OSM
+#   activities is NULL and function is 'OSM', so the ALKIS lists in 04.4 never
+#   touch them; they are judged by their OSM building=* tag instead
+#   (OSM_DROP_ALWAYS / OSM_DROP_UNLESS_POI below). 3,088 are tagged `house` and 531 `apartments`; an OSM
 #   `building=*` -> activity map is the obvious next reference table.
 
 # --- Step 04.4: drop what is not a place of activity ---------------------------
-# Three rules, applied in this order. Decided with the user on 2026-09-10 from
-# the per-code profile: count, volume, physical shape, and how many step-01 POIs
-# fall inside each class.
+# Two lists of ALKIS function codes, applied in this order. Decided class by
+# class with the user on 2026-09-10/11 from the per-code profile: count, volume,
+# physical shape, and how many step-01 POIs sit on each class.
 #
-#   1. ALKIS_DROP_ALWAYS      dropped, no exceptions; the POIs inside are ignored,
-#                             here and in 04.5 (decided 2026-09-10: not re-homed)
-#   2. ALKIS_DROP_UNLESS_POI  dropped unless at least one step-01 POI lies inside
-#   3. home-only              activities are a subset of ALKIS_HOME_ONLY_ACTIVITIES
-#                             and no step-01 POI lies inside
+#   1. ALKIS_DROP_ALWAYS      list 1 - dropped, no exceptions. The POLYGONS go;
+#                             the POIs on them do not: they are placed on the
+#                             actual building next door (POI_SNAP_MAX_DISTANCE_M)
+#   2. ALKIS_DROP_UNLESS_POI  list 2 - dropped unless a POI or a site is on the
+#                             building. Residential buildings are in here BY CODE.
 #
-# "A POI lies inside" = the POI's representative point falls within the
-# footprint, any poi_role. Presence only; the POI join itself is 04.5. OSM
-# gap-fill rows (function 'OSM', no activities) match none of the rules and pass
-# through untouched.
+# "A POI is on the building" = the POI's representative point falls within the
+# footprint of an actual building (one list 1 does not remove), OR the POI is of
+# a building-bound use and this is the nearest actual building within
+# POI_SNAP_MAX_DISTANCE_M, OR the building is at least POI_SITE_RESCUE_MIN_AREA_M2
+# and lies inside a site polygon. Presence only; the POI join itself is 04.5 and
+# must use the same placement. OSM gap-fill rows (function 'OSM') are in neither
+# list and pass through untouched.
 #
-# Codes are keyed on the full '31001_2000' form. Every code listed must exist in
-# the codelist - the notebook asserts it - because a typo here is otherwise a
-# silent no-op, which is exactly the bug the optimized pipeline shipped with
-# ("Buildings for supplying energy" matched no label and removed nothing).
-# Counts in the reasons are this region's, for orientation; a listed code with 0
-# buildings elsewhere is fine.
+# Both lists are keyed on the full '31001_2000' form. Every code listed must
+# exist in the codelist - the notebook asserts it - because a typo here is
+# otherwise a silent no-op, which is exactly the bug the optimized pipeline
+# shipped with ("Buildings for supplying energy" matched no label and removed
+# nothing). Counts in the reasons are this region's, for orientation; a listed
+# code with 0 buildings elsewhere is fine. The activity map plays NO part in the
+# drop; see ALKIS_HOME_ONLY_ACTIVITIES for its one remaining, advisory role.
 
-# Rule 1. Structures with no inside, and building classes decided against.
+# List 1. Structures with no usable inside, plus three technical shells.
 ALKIS_DROP_ALWAYS = {
-    # -- not buildings: nothing happens inside because there is no inside --------
-    "51009_1610": "Ueberdachung, canopy - 94,571 forecourt roofs, carports, bus shelters; median 10 m2. 141 POIs sit under them (fuel stations, pharmacies, banks) and are ignored",
+    # -- roofs, containers, installations ----------------------------------------
+    "51009_1610": "Ueberdachung, canopy - 94,571 forecourt roofs, carports, bus shelters; median 10 m2. 145 POIs sit under them (fuel stations, pharmacies, banks); the canopy goes, the POI moves to the building next to it",
+    "51009_1750": "Denkmal, monument - 11",
     "51003_1201": "Silo - 1,784",
+    "51003_1205": "Tank - 204",
     "51002_1250": "Mast - 1,772",
     "51002_1230": "Solarzellen, ground-mounted PV arrays - 1,177",
     "51002_1220": "Windrad, wind turbine - 423",
-    "51003_1205": "Tank - 204",
     "51002_1260": "Funkmast, radio mast - 178",
     "51002_1290": "Schornstein, chimney - 119",
+    # -- towers, visited or not: structures, not buildings ------------------------
     "51001_1008": "Sende-/Funkturm, transmission tower - 88",
-    "31001_2513": "Wasserbehaelter, water container - 82",
     "51001_1002": "Kirchturm, church tower - 54; the church itself is a separate 31001_3041 polygon",
     "51001_1005": "Kuehlturm, cooling tower - 52",
-    "31001_2213": "Schoepfwerk, drainage pumping station - 30",
-    "51009_1750": "Denkmal, monument - 11",
     "51001_1010": "Foerderturm, mine headframe - 8",
-    "51006_1470": "Sprungschanze, ski jump inrun - 4",
+    "51001_1004": "Kontrollturm, control tower - 4",
     "51001_1007": "Feuerwachturm, fire lookout tower - 1",
-    # -- buildings, decided against: utilities ---------------------------------
-    "31001_2500": "Gebaeude zur Versorgung, supply - 7,806; median 14 m2 transformer boxes. 51 are over 1,000 m2 (Wasserwerk, Gasometer) and go with them",
-    "31001_2600": "Gebaeude zur Entsorgung, disposal - 770",
-    # -- transport operations --------------------------------------------------
-    "31001_2410": "Betriebsgebaeude fuer Strassenverkehr, road - 363",
-    "31001_2420": "Betriebsgebaeude fuer Schienenverkehr, rail - 100",
-    "31001_2430": "Betriebsgebaeude fuer Flugverkehr, air - 51",
-    "31001_2440": "Betriebsgebaeude fuer Schiffsverkehr, shipping - 20",
-    "31001_2450": "Betriebsgebaeude zur Seilbahn, cable car - 18",
-    # -- other classes decided against -----------------------------------------
-    "31001_2740": "Treibhaus/Gewaechshaus, greenhouse - 602; the garden-centre POIs inside are ignored",
-    "31001_3073": "Kaserne, barracks - 132; closed sites",
-    "31001_2171": "Bergwerk, mine - 33",
-    "31001_3281": "Schutzhuette, hiking shelter - 77; median 25 m2",
-    "31001_2073": "Huette mit Uebernachtungsmoeglichkeit, hut - 13",
-    "31001_2211": "Windmuehle, windmill - 12; museums and attractions today",
-    "31001_2212": "Wassermuehle, water mill - 5",
-    # -- tourism and sport structures: not day-to-day destinations -------------
+    "51001_1001": "Wasserturm, water tower - 16; 5 historic markers",
+    "51001_1003": "Aussichtsturm, observation tower - 20; viewpoints, decided as tourism structure 2026-09-11",
+    "51001_1009": "Stadt-/Torturm, city gate tower - 6",
+    "51001_1012": "Schloss-/Burgturm, castle tower - 5",
+    # -- sport and heritage structures -------------------------------------------
     "51006_1431": "Zuschauertribuene ueberdacht, covered stand - 23; the sports site carries the activity",
     "51006_1432": "Zuschauertribuene nicht ueberdacht, open stand - 10",
     "51006_1440": "Stadion - 13; these are the pitch polygons, median 12,600 m2 and 0.4 m tall",
-    "51001_1001": "Wasserturm, water tower - 16",
-    "51001_1003": "Aussichtsturm, observation tower - 20",
-    "51001_1009": "Stadt-/Torturm, city gate tower - 6",
-    "51001_1012": "Schloss-/Burgturm, castle tower - 5",
+    "51006_1470": "Sprungschanze, ski jump inrun - 4",
     "51007_1400": "Befestigung (Burgruine), castle ruins - 17",
-    "51001_1004": "Kontrollturm, control tower - 4",
+    # -- technical shells coded as buildings ---------------------------------------
+    "31001_2513": "Wasserbehaelter, water container - 82",
+    "31001_2213": "Schoepfwerk, drainage pumping station - 30",
+    "31001_3281": "Schutzhuette, hiking shelter - 77; median 25 m2, the one 'restaurant' POI inside is misplaced",
 }
 
-# Rule 2. Dropped unless a step-01 POI lies inside. The class is mostly not a
-# destination, but the exceptions are real and OSM knows them.
+# List 2. Real buildings that are mostly not destinations, but sometimes are -
+# and OSM knows which. Dropped unless a POI or a site is on them.
 ALKIS_DROP_UNLESS_POI = {
+    # -- residential: the case that matters --------------------------------------
+    "31001_1000": "Wohngebaeude, residential buildings - 327,264, 44 % of the region's volume. ALKIS codes a block by its dominant use, so the corner restaurant, the hairdresser, the doctor's practice, the care home and the student hall are coded residential too; ~4,600 of them carry a POI or sit in a site and stay",
+    "31001_1210": "Land-/forstwirtschaftliches Wohngebaeude, farm and forestry residential - 4,197; manors, riding centres and farm cafes among them",
+    "31001_1223": "Forsthaus, forester's house - 37; a home with an office attached",
+    # -- agriculture -------------------------------------------------------------
+    "31001_2720": "Land- und forstwirtschaftliches Betriebsgebaeude, farm buildings - 18,850; 95 hold a riding stable, a farm shop or a cafe, the rest are barns and stables",
+    "31001_2740": "Treibhaus/Gewaechshaus, greenhouse - 602; garden centres and florists among them",
+    # -- parking -------------------------------------------------------------------
     "31001_2461": "Parkhaus, parking garage - 65; an Aldi, a KiK, a bakery and two gyms occupy the ground floor of a few",
     "31001_2462": "Parkdeck, parking deck - 80",
-    "31001_2720": "Land- und forstwirtschaftliches Betriebsgebaeude, farm buildings - 18,850; 95 hold a riding stable, a farm shop or a cafe, the rest are barns and stables",
+    # -- utilities -----------------------------------------------------------------
+    "31001_2500": "Gebaeude zur Versorgung, supply - 7,806; median 14 m2 transformer boxes, but Stadtwerke offices, a Telekom site and a water museum among the large ones",
+    "31001_2600": "Gebaeude zur Entsorgung, disposal - 770; recycling yards have staff",
+    # -- transport operations ------------------------------------------------------
+    "31001_2410": "Betriebsgebaeude fuer Strassenverkehr, road - 363; depots",
+    "31001_2420": "Betriebsgebaeude fuer Schienenverkehr, rail - 100; station kiosks, cafes, newsagents",
+    "31001_2430": "Betriebsgebaeude fuer Flugverkehr, air - 51",
+    "31001_2440": "Betriebsgebaeude fuer Schiffsverkehr, shipping - 20",
+    "31001_2450": "Betriebsgebaeude zur Seilbahn, cable car - 18; a pub among them",
+    # -- other buildings ------------------------------------------------------------
+    "31001_3073": "Kaserne, barracks - 132; a kindergarten, a college and a hospice sit inside",
+    "31001_2171": "Bergwerk, mine - 33",
+    "31001_2073": "Huette mit Uebernachtungsmoeglichkeit, hut - 13",
+    "31001_2211": "Windmuehle, windmill - 12; museums and attractions today",
+    "31001_2212": "Wassermuehle, water mill - 5; a guest house among them",
+    # -- religious and funeral -----------------------------------------------------
+    "31001_3043": "Kapelle, chapel - 475; cemetery and wayside chapels, median 92 m2; 41 % carry a POI",
+    "31001_3081": "Trauerhalle, mourning hall - 94; cemetery funeral halls",
 }
 
-# What "a POI lies inside" means per poi_role, for rules 2 and 3:
-#   point, footprint  the node, or the representative point of the OSM building
-#                     polygon carrying the tag, falls within the footprint. This
-#                     names THE building: the median building it rescues is about
-#                     200 m2, and the few under 50 m2 are holiday chalets that
-#                     are the POI themselves.
-#   site              an area polygon - school grounds, a care home, a campus, a
-#                     riding centre, a holiday park. It says "activity somewhere
-#                     in here", not "in this shed". Taken literally it would
-#                     rescue the 285 garden huts of 1-3 m2 in one allotment
-#                     colony and the bike sheds on every school site. So a site
-#                     rescues only the SUBSTANTIAL buildings inside it: the
-#                     building's representative point within the site polygon
-#                     AND its footprint at least this many m2. 200 is bigger than
-#                     any single-family house and smaller than a care-home wing.
-#                     Measured on this region: sites alone would rescue 1,179
-#                     rule-2/3 buildings with no threshold, 384 of them under
-#                     50 m2; at 200 m2, 322 remain - care-home wings coded
-#                     residential, riding halls, campus buildings (100 m2 would
-#                     keep 548, 50 m2 795). The notebook prints the ladder.
+# The OSM gap fill (04.3) has no AdV code, so the same two lists exist keyed on
+# the OSM building=* tag, read from `osm_building` lower-cased. Decided with the
+# user on 2026-09-11 from the tag profile of the 47,264 filled footprints (90
+# tags, 71 % just 'yes'). A tag in neither list is kept - that is the activity
+# tags (commercial, retail, office, school, kindergarten, ...). The bare 'yes'
+# says nothing and is in list 2: without a POI or site on it, noise.
+
+# OSM list 1. Structures and sheds by their own tag; median footprint well
+# under 50 m2 for nearly all. POIs on them move to the neighbour like the
+# canopy POIs (15 fuel and car-wash points sit under 'roof').
+OSM_DROP_ALWAYS = {
+    "garage": "2,178; 68 % under 50 m2",
+    "garages": "159",
+    "shed": "1,807; 94 % under 50 m2",
+    "hut": "887; median 10 m2 - hiking shelters, info pavilions",
+    "roof": "444; the OSM twin of the ALKIS canopy, 15 POIs under them (fuel, car wash) move next door",
+    "carport": "318",
+    "service": "198; median 8 m2 - utility boxes, river gauges",
+    "allotment_house": "185; garden huts",
+    "silo": "31",
+    "storage_tank": "25",
+    "digester": "28; biogas tanks",
+    "slurry_tank": "7",
+    "transformer_tower": "14",
+    "container": "16",
+    "conservatory": "15",
+    "static_caravan": "30",
+    "toilets": "12",
+    "transportation": "11; median 8 m2 - bus shelters, platforms",
+    "outbuilding": "11",
+    "ruins": "14",
+    "shelter": "7",
+    "grandstand": "9; the sports site carries the activity",
+    "aviary": "7",
+    "bunker": "4",
+    "bridge": "4",
+    "platform": "4",
+    "tent": "2",
+    "tower": "1",
+    "staircase": "1",
+    "stage": "1",
+    "elevator": "1",
+    "booth": "1",
+    "construction_trailer": "1",
+    "dovecote": "1",
+}
+
+# OSM list 2. The OSM twins of the ALKIS list-2 classes: dropped unless a POI
+# or a site is on the footprint.
+OSM_DROP_UNLESS_POI = {
+    # -- untagged: the tag carries no information, so the POIs decide ------------------
+    "yes": "33,603; 70 % under 50 m2. Decided 2026-09-11: a bare yes footprint with no POI or site on it is noise",
+    # -- residential ---------------------------------------------------------------
+    "house": "3,088",
+    "detached": "1,365",
+    "semidetached_house": "405",
+    "apartments": "531; 25 POIs on them - social facilities, restaurants, bakeries, cafes",
+    "residential": "469",
+    "terrace": "98",
+    "bungalow": "184; holiday bungalows with chalet POIs among them",
+    "dormitory": "9",
+    "cabin": "102",
+    # -- farm ----------------------------------------------------------------------
+    "farm_auxiliary": "94",
+    "barn": "29",
+    "stable": "29",
+    "cowshed": "4",
+    "sty": "2",
+    "chicken_coop": "1",
+    "farm": "7; farmhouses",
+    "agricultural": "1",
+    "riding_hall": "2",
+    # -- greenhouses ---------------------------------------------------------------
+    "greenhouse": "170; garden centres among them",
+    "glasshouse": "2",
+    # -- other ---------------------------------------------------------------------
+    "construction": "100; buildings under construction, some already with a POI",
+    "parking": "14",
+    "hangar": "3",
+    "boathouse": "3",
+    "pavilion": "7",
+    "pavillon": "1; misspelling in the source",
+}
+
+# A site POI - an area polygon such as school grounds, a care home, a campus, a
+# riding centre or a holiday park - says "activity somewhere in here", not "in
+# this shed". Taken literally it would rescue the 285 garden huts of 1-3 m2 in
+# one allotment colony and the bike sheds on every school site. So a site
+# rescues only the SUBSTANTIAL list-2 buildings inside it: representative point
+# within the site polygon and footprint at least this many m2. 200 is bigger
+# than any single-family house and smaller than a care-home wing. Measured on
+# this region: sites alone would rescue 1,735 list-2 buildings with no
+# threshold, 688 of them under 50 m2; at 200 m2, 451 remain - care-home
+# wings coded residential, riding halls, campus buildings, supply and barracks
+# buildings on factory sites (100 m2 would keep 732, 50 m2 1,047). The
+# notebook prints the ladder.
 POI_SITE_RESCUE_MIN_AREA_M2 = 200
 
-# Rule 3. A building whose activity set is a SUBSET of this describes a home and
-# nothing else, so it hosts none of the demand a capacity model places. Expressed
-# as a rule over `activities` rather than as a hand-kept code list, so a building
-# that also hosts trade, work or errands is retained automatically - the flat
-# with a shop on the ground floor stays, which is the case that matters. Where
-# ALKIS coded a block residential but step 01 found a POI inside (measured:
-# 4,038 residential buildings hold 4,880 POIs - restaurants, hairdressers,
-# doctors, social facilities), the POI wins and the building stays, flagged
-# `rescued`.
+# Placing a POI that is not inside an actual building: the fuel point under the
+# forecourt canopy once the canopy is dropped, the cafe node the mapper put a
+# few metres outside the wall. Such a POI goes to the nearest actual building
+# within this distance. Decided 2026-09-10 (the previous pipeline used 100 m).
+# Measured on this region's misplaced building-bound POIs: 53 % are within 5 m
+# of a kept building, 88 % within 25 m, 95 % within 50 m, 98 % within 100 m;
+# beyond 50 m the nearest building is more likely the wrong one.
+POI_SNAP_MAX_DISTANCE_M = 50
+
+# Only BUILDING-BOUND uses are snapped. Decided by the data rather than a hand
+# list: a poi_use is building-bound when at least this share of its POIs
+# region-wide sit inside some footprint. Restaurants, supermarkets, hairdressers,
+# doctors, fuel: 90-97 %. Kindergartens 73 %, schools 78 %, sports centres 58 %,
+# farms 58 %, riding centres 75 %: the node is often placed on the grounds, and
+# they must snap too, hence 0.5 rather than 0.8. Below it only outdoor things
+# remain - swimming pools 3 %, graveyards 2 %, ruins 24 %, information boards
+# 30 %, attractions 31 %, riding arenas 43 % - which are never snapped, so a
+# garden pool cannot land on the neighbour's house and rescue it.
+POI_BUILDING_BOUND_MIN_INSIDE_SHARE = 0.5
+
+# The activity map's ONE remaining role in the drop, advisory only: a code whose
+# activities are a subset of this and which is in neither list is flagged by the
+# notebook, because in another region it is almost certainly a residential code
+# (1010 Wohnhaus, 1020 Wohnheim, 1022 Seniorenheim, ...) that belongs in list 2.
+# Nothing is dropped because of it.
+#
+# THE COST of list 2's residential entry, decided deliberately: `meetup` IS a
+# redistribution target - the original pipeline maps MiD `meetup` -> Leisure -
+# and dropping 31001_1000 removes about 280M m3 of it. So visiting-friends trips
+# have nowhere to land and Leisure demand falls entirely on pubs, sports halls
+# and cinemas. Accepted: home visits are out of scope for a capacity model.
+# Revisit here if the Leisure totals later look too concentrated on venues.
 ALKIS_HOME_ONLY_ACTIVITIES = frozenset({"home", "meetup"})
-
-# The codes the rule selects on this region (before the POI rescue), asserted
-# against the data. If the computed set differs, the activity map or the source
-# release has changed and the reasoning below needs revisiting rather than the
-# list being edited.
-ALKIS_EXPECTED_HOME_ONLY = {
-    "31001_1000": "residential buildings (home;meetup) - 327,264 buildings, 299.9M m3",
-    "31001_1210": "agricultural and forestry residential (home) - 4,197 buildings, 6.2M m3",
-}
-
-# THE COST, decided deliberately: `meetup` IS a redistribution target - the
-# original pipeline maps MiD `meetup` -> Leisure - and dropping 31001_1000
-# removes 299.9M m3 of it. So visiting-friends trips have nowhere to land and
-# Leisure demand falls entirely on pubs, sports halls and cinemas. Accepted:
-# home visits are out of scope for a capacity model. Revisit here if the Leisure
-# totals later look too concentrated on venues.
