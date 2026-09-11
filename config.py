@@ -35,7 +35,13 @@ TARGET_CRS = "EPSG:25832"   # UTM zone 32N
 
 # Inputs (user-supplied, placed in data/input/)
 STUDY_BOUNDARY_FILE = INPUT_DIR / "regionalverband_area.gpkg"   # clip polygon: 8 districts + VW-Werk (contained)
-OSM_PBF_FILE        = INPUT_DIR / "niedersachsen-260113.osm.pbf"  # Geofabrik extract
+# Geofabrik snapshot, https://download.geofabrik.de/europe/germany/niedersachsen.html
+# (daily latest, monthly archive). This is the only raw input that moves: between
+# 260113 and 260910 the region gained 4 % POI-tagged objects and 1.4 % footprints.
+# ALKIS Landnutzung is cut once a year (260101 is current) and the LoD2 tiles
+# date from mid-2024 with no fixed update cycle. Refresh: download the dated
+# file, change the name here, rerun steps 01 and 04.
+OSM_PBF_FILE        = INPUT_DIR / "niedersachsen-260910.osm.pbf"  # data up to 2026-09-10T20:21Z
 
 # Outputs
 CLIPPED_PBF_FILE       = OUTPUT_DIR / "01_study_area_clipped.pbf"
@@ -105,6 +111,36 @@ ALL_BUILDINGS_OSM_FILE = OUTPUT_DIR / "01_all_buildings_osm.gpkg"
 # puts on commercial land. Where they disagree, ALKIS looked at the parcel.
 ALKIS_LANDUSE_FILE = INPUT_DIR / "FS_LN_03_NI_260101.gpkg"
 
+# The 22 layers of that file, by their German layer name, and the English label
+# that step 04 writes into `alkis_landuse`. Only English reaches the layer and
+# the LLM, as with the building classes. A layer missing here stops the run -
+# a new release with a new layer must be looked at, not silently carried as a
+# German name.
+ALKIS_LANDUSE_LABELS_EN = {
+    "ln_wohnnutzung":                      "residential",
+    "ln_landwirtschaft":                   "agriculture",
+    "ln_forstwirtschaft":                  "forestry",
+    "ln_aquakulturundfischereiwirtschaft": "aquaculture and fisheries",
+    "ln_industrieundverarbeitendesgewerbe": "industry and manufacturing",
+    "ln_gewerblichedienstleistungen":      "commercial services",
+    "ln_lagerung":                         "storage",
+    "ln_abbau":                            "mining and extraction",
+    "ln_oeffentlicheeinrichtungen":        "public facilities",
+    "ln_kulturundunterhaltung":            "culture and entertainment",
+    "ln_bestattung":                       "cemetery",
+    "ln_versorgungundentsorgung":          "utilities and waste",
+    "ln_wasserwirtschaft":                 "water management",
+    "ln_schutzanlage":                     "protective structure",
+    "ln_sportanlage":                      "sports facility",
+    "ln_freizeitanlage":                   "leisure facility",
+    "ln_freiluftundnaherholung":           "open-air recreation",
+    "ln_strassenundwegeverkehr":           "road traffic",
+    "ln_bahnverkehr":                      "rail traffic",
+    "ln_schiffsverkehr":                   "shipping",
+    "ln_flugverkehr":                      "air traffic",
+    "ln_ohnenutzung":                      "unused",
+}
+
 # The land-use rule (decided 2026-09-11) for a building whose ALKIS class can
 # carry noise in numbers and that nothing else describes. Two kinds of class:
 #   generic non-residential  the code says only "some business / public use /
@@ -145,7 +181,7 @@ ALKIS_LANDUSE_RULE_CLASSES = frozenset({
     "31001_2000", "31001_2100", "31001_2010", "31001_3000", "31001_3200",   # generic non-residential
     "31001_1110", "31001_1120", "31001_1130",                               # residential-first mixed
 })
-ALKIS_LANDUSE_DROP = frozenset({"wohnnutzung", "landwirtschaft"})
+ALKIS_LANDUSE_DROP = frozenset({"residential", "agriculture"})   # English labels from ALKIS_LANDUSE_LABELS_EN
 
 # ──────────────────────────────────────────────
 # STEP 01 — what is a POI candidate, and what is not
