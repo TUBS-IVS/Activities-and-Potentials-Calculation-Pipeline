@@ -40,6 +40,7 @@ OSM_PBF_FILE        = INPUT_DIR / "niedersachsen-260113.osm.pbf"  # Geofabrik ex
 # Outputs
 CLIPPED_PBF_FILE       = OUTPUT_DIR / "01_study_area_clipped.pbf"
 ALL_POIS_FILE          = OUTPUT_DIR / "01_all_pois.gpkg"
+LANDUSE_OSM_FILE       = OUTPUT_DIR / "01_landuse_osm.gpkg"     # every OSM landuse=* polygon, for the land-use check in step 04
 ALL_BUILDINGS_OSM_FILE = OUTPUT_DIR / "01_all_buildings_osm.gpkg"
 
 # ──────────────────────────────────────────────
@@ -85,6 +86,67 @@ ALL_BUILDINGS_OSM_FILE = OUTPUT_DIR / "01_all_buildings_osm.gpkg"
 #
 # `craft` is a filter key for the same reason: it was returning 54 rows as an
 # incidental column and returns 644 as a key.
+# --- ALKIS Landnutzung (land use), open data ----------------------------------------
+# The statewide ALKIS land-use layer from LGLN's STAC catalogue
+# (https://alkis.stac.lgln.niedersachsen.de/collections/alkis-landnutzung), cut
+# 2026-01-01, CC-BY-4.0, 3.4 GB. Seamless: 22 layers (ln_wohnnutzung,
+# ln_landwirtschaft, ln_gewerblichedienstleistungen, ...), every parcel in
+# exactly one, 468,146 polygons over the region. Step 04 clips it to the region
+# on the fly (~15 s) and writes the class under every building's centre as
+# `alkis_landuse`. Replaces the five themed 2023 extracts used before, which had
+# no agricultural class and put farm halls under residential.
+#
+# ALKIS records the DOMINANT use of a parcel, so a shop with flats above stands
+# on wohnnutzung. That is why the land only decides for buildings nothing else
+# describes - anything with a POI, a site or a named/use-tagged OSM twin has
+# been kept by stronger evidence already. OSM landuse (01_landuse_osm.gpkg) is
+# carried as `osm_landuse` for information only: it draws one residential
+# polygon around a whole village and covers 488 of the 564 halls that ALKIS
+# puts on commercial land. Where they disagree, ALKIS looked at the parcel.
+ALKIS_LANDUSE_FILE = INPUT_DIR / "FS_LN_03_NI_260101.gpkg"
+
+# The land-use rule (decided 2026-09-11) for a building whose ALKIS class can
+# carry noise in numbers and that nothing else describes. Two kinds of class:
+#   generic non-residential  the code says only "some business / public use /
+#                            recreation happens here" and names no use:
+#                            2000, 2100, 2010, 3000, 3200
+#   residential-first mixed  a dwelling with some trade in it: 1110, 1120, 1130.
+#                            On a residential parcel with nothing in OSM
+#                            confirming the trade, that is a house.
+# Codes that name a specific use (3072 fire station, 3021 school, 3041 church)
+# and the business-first mixed codes with housing (2310, 2320, 3100) are NOT in
+# the rule: there the code itself is the information, and together they held
+# 127 such buildings across 20 classes. "Nothing describes" means: no
+# POI, no site, no OSM twin name, and the twin footprint (if any) is mute - a
+# bare 'yes', a residential or farm tag from OSM_DROP_UNLESS_POI (house,
+# apartments, barn, stable, ...) or a structure tag from OSM_TWIN_STRUCTURE_TAGS.
+# For class 2000 the rule starts at ALKIS_SIZE_FLOOR_EVIDENCE_M2, below which the
+# floor and the evidence band already decide; the other classes have no floor,
+# so the rule applies at every size. Then the ALKIS land-use parcel under the centre
+# decides:
+#   ALKIS_LANDUSE_DROP   the land says living or farming: the building goes
+#   everything else      commercial services, industry, public, storage,
+#                        utilities, transport, recreation, or unknown: it stays
+#                        as a generic workplace
+# Measured first pass (bare/no twin, class 2000 only) on 7,156 halls: 3,050 on
+# wohnnutzung (median 268 m2, 9 m tall - houses coded business), 2,728 on
+# landwirtschaft (barns and machinery halls), 1,183 on business land. Second
+# pass (mute twins, class 2100 added) measured on 20,842 buildings: 7,409 go -
+# 7,119 class-2000 halls (house, barn and garages twins now included) and 470
+# class-2100 workshops (median 89 m2, 5 m tall, 350 on wohnnutzung); 13,253
+# stay on business land. Third pass, the six further codes: 2,198 kept buildings
+# still showed the pattern, 84 % of them in two classes - 1,238 of 5,788 class
+# 1120 (median 152 m2, 10.6 m: two-storey houses) and 606 of 8,542 class 2010
+# (median 68 m2) - the rest 89 class 1130, 89 class 3000, 28 class 3200,
+# 21 class 1110. With all eight: 36,827 undescribed buildings, 9,554 go
+# (20.2M m3), 26,964 stay on business, public or infrastructure land; the
+# layer ends at 48,966 buildings.
+ALKIS_LANDUSE_RULE_CLASSES = frozenset({
+    "31001_2000", "31001_2100", "31001_2010", "31001_3000", "31001_3200",   # generic non-residential
+    "31001_1110", "31001_1120", "31001_1130",                               # residential-first mixed
+})
+ALKIS_LANDUSE_DROP = frozenset({"wohnnutzung", "landwirtschaft"})
+
 # ──────────────────────────────────────────────
 # STEP 01 — what is a POI candidate, and what is not
 # ──────────────────────────────────────────────
