@@ -912,7 +912,7 @@ OSM_GAP_EXPECTED_SHARE_PCT = (5.0, 15.0)
 # code with 0 buildings elsewhere is fine. The activity map plays NO part in the
 # drop; see ALKIS_HOME_ONLY_ACTIVITIES for its one remaining, advisory role.
 
-# List 1. Structures with no usable inside, plus three technical shells.
+# List 1. Structures with no usable inside, three technical shells, and the mills.
 ALKIS_DROP_ALWAYS = {
     # -- roofs, containers, installations ----------------------------------------
     "51009_1610": "Ueberdachung, canopy - 94,571 forecourt roofs, carports, bus shelters; median 10 m2. 145 POIs sit under them (fuel stations, pharmacies, banks); the canopy goes, the POI moves to the building next to it",
@@ -941,6 +941,8 @@ ALKIS_DROP_ALWAYS = {
     "51006_1440": "Stadion - 13; these are the pitch polygons, median 12,600 m2 and 0.4 m tall",
     "51006_1470": "Sprungschanze, ski jump inrun - 4",
     "51007_1400": "Befestigung (Burgruine), castle ruins - 17",
+    "31001_2211": "Windmuehle, windmill - 12; moved from list 2 on 2026-09-11: the 1 survivor was kept by an attraction POI only",
+    "31001_2212": "Wassermuehle, water mill - 5; moved from list 2 on 2026-09-11 with the windmills",
     # -- technical shells coded as buildings ---------------------------------------
     "31001_2513": "Wasserbehaelter, water container - 82",
     "31001_2213": "Schoepfwerk, drainage pumping station - 30",
@@ -973,8 +975,6 @@ ALKIS_DROP_UNLESS_POI = {
     "31001_3073": "Kaserne, barracks - 132; a kindergarten, a college and a hospice sit inside",
     "31001_2171": "Bergwerk, mine - 33",
     "31001_2073": "Huette mit Uebernachtungsmoeglichkeit, hut - 13",
-    "31001_2211": "Windmuehle, windmill - 12; museums and attractions today",
-    "31001_2212": "Wassermuehle, water mill - 5; a guest house among them",
     # -- religious and funeral -----------------------------------------------------
     "31001_3043": "Kapelle, chapel - 475; cemetery and wayside chapels, median 92 m2; 41 % carry a POI",
     "31001_3081": "Trauerhalle, mourning hall - 94; cemetery funeral halls",
