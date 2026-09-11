@@ -907,6 +907,36 @@ ALKIS_ALLOW_EMPTY_COLS = ["functions_all"]
 # Reads 03_alkis_by_building.gpkg (one row per ALKIS object) and attaches what
 # each building is FOR: the AdV function labels, the MiD activity map, and the
 # OSM POI layer from step 01. Step 03 was structural; this step is semantic.
+#
+# THE FILTER LADDER (section 7 of the notebook), in the order the reasons are
+# assigned - a building gets the FIRST reason that applies, `drop_reason` on
+# the labelled extract, NULL when kept. State on 2026-09-11 (OSM 260910):
+# 869,316 ALKIS + 50,011 OSM gap-fill = 919,327 polygons in, 49,297 out.
+#
+#   list1                     ALKIS_DROP_ALWAYS / OSM_DROP_ALWAYS: canopies, masts,
+#                             garages, sheds, roofs, towers ... no POI can save them
+#   floor_structure           class 2000 under ALKIS_SIZE_FLOOR_M2 whose OSM twin is
+#                             in OSM_TWIN_STRUCTURE_TAGS: goes with list 1
+#   list2_no_poi              ALKIS_DROP_UNLESS_POI / OSM_DROP_UNLESS_POI (residential,
+#                             farm, bare 'yes' ...) with no POI or site on them
+#   floor_no_poi              class 2000 under ALKIS_SIZE_FLOOR_M2, nothing on it
+#                             (an OSM_TWIN_ACTIVITY_TAGS twin keeps it)
+#   floor_no_evidence         class 2000 between the floor and
+#                             ALKIS_SIZE_FLOOR_EVIDENCE_M2 with no POI, site, activity
+#                             twin or named twin
+#   land_residential_or_farm  ALKIS_LANDUSE_RULE_CLASSES with a mute twin, no POI,
+#                             site or name, on ALKIS_LANDUSE_DROP land
+#   twin_structure_no_poi     every OSM footprint on it in OSM_TWIN_STRUCTURE_TAGS,
+#                             nothing on it - any class, any size
+#
+# What saves a building (`rescued_by`): poi (inside), snap (a building-bound
+# POI within POI_SNAP_MAX_DISTANCE_M, see POI_BUILDING_BOUND_MIN_INSIDE_SHARE),
+# site (inside a site polygon of POI_SITE_RESCUE_MIN_AREA_M2 or more), osm_tag
+# (an OSM_TWIN_ACTIVITY_TAGS twin), osm_name (a named twin). Kept buildings
+# then receive their POIs with shares (04.5) and are written to
+# ENRICHED_BUILDINGS_FILE; OSM gap-fill rows carry an estimated volume
+# (OSM_GAP_FLOOR_HEIGHT_M). The three QGIS extracts are LABELLED_INSPECT_FILE
+# (everything, with the flags), KEPT_INSPECT_FILE and POI_ASSIGNMENTS_FILE.
 
 # --- Step 04.1: slim the layer down to what enrichment and classification need
 # 31 attribute columns in, 18 out (plus geometry). `function` is the parameter everything downstream turns
@@ -1029,6 +1059,24 @@ OSM_GAP_EXCLUDE_BUILDING_TAGS = frozenset({"no"})
 # up.
 OSM_GAP_FUNCTION_CODE = "OSM"
 OSM_GAP_LABEL_EN = "Building mapped in OSM, no ALKIS record"
+
+# Height and volume of the filled rows (decided 2026-09-11). There is no LoD2
+# model to measure, so the estimate of the previous pipeline is used, unchanged:
+#   height = OSM `height` tag if present,
+#            else `building:levels` x OSM_GAP_FLOOR_HEIGHT_M,
+#            else OSM_GAP_DEFAULT_FLOORS x OSM_GAP_FLOOR_HEIGHT_M;
+#   volume = footprint area x height, written to BOTH volume_3d_m3 and
+#            volume_old_m3 (volume_ratio 1.0), height to height_top_max_m and
+#            height_top_avg_m.
+# So every polygon in the layer carries geometry, and the volume-weighted
+# redistribution no longer gives these rows zero weight. `source == 'osm'`
+# marks the estimate. Of the 1,609 filled rows kept on 2026-09-11, 217 had
+# levels and 43 a height; the other 84 % get the default. For comparison the
+# kept ALKIS buildings have a median roof height of 7.3 m and 6.1 m3 per m2 of
+# footprint, so 2 m per floor is a deliberately conservative floor, not a
+# typical building.
+OSM_GAP_FLOOR_HEIGHT_M = 2.0   # previous pipeline: DEFAULT_FLOOR_HEIGHT_M
+OSM_GAP_DEFAULT_FLOORS = 1     # previous pipeline: DEFAULT_FLOORS
 
 # The filled rows take `ags` and `city` from the NEAREST ALKIS building rather
 # than from OSM's `addr:city`, so the administrative key stays in ALKIS's own
