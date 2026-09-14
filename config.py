@@ -1618,3 +1618,17 @@ LLM_COLUMN_ROLES = {
 LLM_INPUT_COLS  = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "llm")
 LLM_MODEL_COLS  = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "model")
 LLM_DROPPED_COLS = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "drop")
+
+# --- Step 05.2: the prompt input ---------------------------------------------------
+# One building, one record, one call (decided 2026-09-14: no batching - the
+# model runs locally, tokens cost nothing but runtime, so records are compact
+# and nothing is sent that is not needed). lib/llm_record.py renders the
+# record: a labelled block whose lines name their SOURCE - inside (the POIs,
+# name paired with use, from the building_pois layer), site, cadastre, osm
+# footprint, land, place - with empty lines omitted and numbers rounded. It is
+# the key=value format the previous pipeline validated, with the POI pairs and
+# the source labels as the improvements. The file below holds every record
+# with the model-only columns beside it, so 05.5 reads a fixed input and the
+# validation can reproduce exactly what the model saw.
+LLM_INPUT_FILE = OUTPUT_DIR / "05_llm_input.parquet"
+LLM_RECORD_SAMPLE_PER_GROUP = 3     # records printed per evidence group in the notebook
