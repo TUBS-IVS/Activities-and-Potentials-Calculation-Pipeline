@@ -16,9 +16,6 @@ data/experimental_extract/*
 # Reference tables are user-supplied region data, not code.
 data/reference/*
 !data/reference/.gitkeep
-!data/output/llm_predictions/
-data/output/llm_predictions/*
-!data/output/llm_predictions/.gitkeep
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
