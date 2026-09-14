@@ -184,6 +184,97 @@ ALKIS_LANDUSE_RULE_CLASSES = frozenset({
 })
 ALKIS_LANDUSE_DROP = frozenset({"residential", "agriculture"})   # English labels from ALKIS_LANDUSE_LABELS_EN
 
+# The parcel's CODED kind, one level below the layer, decoded to English as
+# `alkis_landuse_detail` (added 2026-09-14: "more information is better than
+# skipping information"). Public-facility parcels carry `funktion` (1110
+# government and administration, 1120 education and science, 1140 religious,
+# 1150 health, 1160 social services, 1170 public safety), utility, industry
+# and recreation parcels carry `art`. The labels come from the AdV codelists
+# in the GDI-DE registry (https://registry.gdi-de.org/codelist/de.adv-online.gid/
+# AX_Funktion_FlaecheBesondererFunktionalerPraegung, AX_Funktion_IndustrieUnd-
+# Gewerbeflaeche, AX_Funktion_SportFreizeitUndErholungsflaeche), fetched
+# 2026-09-14 and matched against the codes actually present in the region.
+# Layers whose codes do NOT match a registry list are left undecoded on
+# purpose - transport (51xx/52xx), culture (1210/1220), storage (8xxx),
+# extraction, forest and water - a wrong label being worse than none. A code
+# present in the data but missing here is reported by step 04, not invented:
+# 2026-09-14 that was 4370 (125 leisure parcels) and 1550/1600 (205
+# commercial-services parcels), which no current registry list carries.
+# Layer -> (attribute, {code: English label}).
+ALKIS_LANDUSE_DETAIL_EN = {
+    "ln_oeffentlicheeinrichtungen": ("funktion", {
+    "1100": "public purposes", "1110": "government and administration", "1120": "education and science",
+    "1130": "culture", "1140": "religious institution", "1150": "health and spa", "1160": "social services",
+    "1170": "public safety and order", "1180": "media and communication", "1200": "parking",
+    "1300": "historic site", "1310": "castle or fortress", "1320": "palace grounds",
+    }),
+    "ln_versorgungundentsorgung": ("art", {
+    "2500": "utility plant", "2501": "utility plant", "2502": "utility plant", "2520": "waterworks",
+    "2521": "waterworks", "2522": "waterworks", "2530": "power plant", "2531": "power plant",
+    "2532": "power plant", "2540": "transformer station", "2550": "refinery", "2551": "refinery",
+    "2552": "refinery", "2560": "gasworks", "2561": "gasworks", "2562": "gasworks", "2570": "heating plant",
+    "2571": "heating plant", "2572": "heating plant", "2580": "radio and telecommunications facility",
+    "2581": "radio and telecommunications facility", "2582": "radio and telecommunications facility",
+    "2600": "waste disposal", "2601": "waste disposal", "2602": "waste disposal",
+    "2610": "sewage treatment plant", "2611": "sewage treatment plant", "2612": "sewage treatment plant",
+    "2620": "waste treatment plant", "2621": "waste treatment plant", "2622": "waste treatment plant",
+    "2623": "waste treatment plant", "2630": "landfill", "2640": "underground landfill",
+    "2700": "extraction facility", "2701": "extraction facility",
+    }),
+    "ln_industrieundverarbeitendesgewerbe": ("art", {
+    "1400": "trade and services", "1410": "professional services", "1420": "banking", "1430": "insurance",
+    "1440": "trade", "1450": "exhibition and fairs", "1460": "accommodation", "1470": "restaurants",
+    "1480": "entertainment", "1490": "horticulture", "1510": "crafts", "1520": "petrol station",
+    "1530": "logistics and transport", "1540": "research and development", "1700": "industry and commerce",
+    "1701": "industry and commerce", "1710": "production", "1740": "storage area", "1770": "raw materials",
+    "1780": "company social facility", "1790": "shipyard", "1801": "food and feed production",
+    "1802": "textiles and clothing", "1803": "wood and packaging products",
+    "1804": "print, audio and video products", "1805": "mineral oil processing and coking",
+    "1806": "chemicals, pharma and plastics", "1807": "mineral building materials",
+    "1808": "metal production and processing", "1809": "technology, electrics and electronics",
+    "1810": "mechanical engineering", "1811": "vehicle construction", "1812": "furniture and consumer goods",
+    }),
+    "ln_gewerblichedienstleistungen": ("art", {
+    "1400": "trade and services", "1410": "professional services", "1420": "banking", "1430": "insurance",
+    "1440": "trade", "1450": "exhibition and fairs", "1460": "accommodation", "1470": "restaurants",
+    "1480": "entertainment", "1490": "horticulture", "1510": "crafts", "1520": "petrol station",
+    "1530": "logistics and transport", "1540": "research and development", "1700": "industry and commerce",
+    "1701": "industry and commerce", "1710": "production", "1740": "storage area", "1770": "raw materials",
+    "1780": "company social facility", "1790": "shipyard", "1801": "food and feed production",
+    "1802": "textiles and clothing", "1803": "wood and packaging products",
+    "1804": "print, audio and video products", "1805": "mineral oil processing and coking",
+    "1806": "chemicals, pharma and plastics", "1807": "mineral building materials",
+    "1808": "metal production and processing", "1809": "technology, electrics and electronics",
+    "1810": "mechanical engineering", "1811": "vehicle construction", "1812": "furniture and consumer goods",
+    }),
+    "ln_freizeitanlage": ("art", {
+    "4100": "sports facility", "4101": "sports facility", "4110": "golf", "4120": "sports ground",
+    "4130": "racetrack", "4140": "equestrian sports", "4150": "shooting range", "4160": "ice or roller rink",
+    "4170": "tennis", "4200": "leisure facility", "4210": "zoo", "4211": "zoo", "4220": "wildlife park",
+    "4230": "amusement park", "4235": "climbing facility", "4240": "open-air stage",
+    "4250": "open-air museum", "4260": "drive-in cinema", "4270": "driving practice or test ground",
+    "4275": "go-kart track", "4280": "dog training ground", "4290": "model aircraft field",
+    "4295": "air sports field", "4300": "recreation area", "4301": "recreation area",
+    "4310": "weekend and holiday home area", "4320": "swimming", "4321": "swimming", "4330": "campsite",
+    "4331": "campsite", "4400": "green space", "4410": "settlement green space", "4420": "park",
+    "4430": "botanical garden", "4431": "botanical garden", "4440": "allotment gardens",
+    "4450": "weekend site", "4460": "garden", "4470": "playground or kick-about field",
+    }),
+    "ln_freiluftundnaherholung": ("art", {
+    "4100": "sports facility", "4101": "sports facility", "4110": "golf", "4120": "sports ground",
+    "4130": "racetrack", "4140": "equestrian sports", "4150": "shooting range", "4160": "ice or roller rink",
+    "4170": "tennis", "4200": "leisure facility", "4210": "zoo", "4211": "zoo", "4220": "wildlife park",
+    "4230": "amusement park", "4235": "climbing facility", "4240": "open-air stage",
+    "4250": "open-air museum", "4260": "drive-in cinema", "4270": "driving practice or test ground",
+    "4275": "go-kart track", "4280": "dog training ground", "4290": "model aircraft field",
+    "4295": "air sports field", "4300": "recreation area", "4301": "recreation area",
+    "4310": "weekend and holiday home area", "4320": "swimming", "4321": "swimming", "4330": "campsite",
+    "4331": "campsite", "4400": "green space", "4410": "settlement green space", "4420": "park",
+    "4430": "botanical garden", "4431": "botanical garden", "4440": "allotment gardens",
+    "4450": "weekend site", "4460": "garden", "4470": "playground or kick-about field",
+    }),
+}
+
 # ──────────────────────────────────────────────
 # STEP 01 — what is a POI candidate, and what is not
 # ──────────────────────────────────────────────
@@ -1447,3 +1538,83 @@ POI_ASSIGNMENTS_FILE = EXPERIMENTAL_DIR / "04_poi_assignments.gpkg"
 # and cinemas. Accepted: home visits are out of scope for a capacity model.
 # Revisit here if the Leisure totals later look too concentrated on venues.
 ALKIS_HOME_ONLY_ACTIVITIES = frozenset({"home", "meetup"})
+
+# ──────────────────────────────────────────────
+# STEP 05 — LLM classification: what the model reads
+# ──────────────────────────────────────────────
+# Reads 04_buildings_enriched.gpkg and asks an LLM, per building, which
+# activities happen inside and which Bosserhof building-use class it is. This
+# block decides, column by column, what the LLM SEES, what only the MODEL needs
+# (keys, weights, the rule baseline), and what is NOISE for this step. Decided
+# with the user 2026-09-14 on the 42 columns of the enriched layer; the notebook
+# asserts every column of the layer is assigned here, so a column added or
+# removed in step 04 stops this step until it has been classified.
+#
+# Principles:
+#   * the LLM reads what describes what happens inside, in three blocks of
+#     falling trust: what is inside (POIs, sites), what the building is (ALKIS
+#     class and name, OSM footprint tag and name), where and how big it is
+#     (land use, city, footprint, height). Size sets the scale of an activity,
+#     not its kind - the prompt says so.
+#   * `activities`, the rule-based MiD map from the ALKIS class, is NOT shown:
+#     shown, it anchors the answer to the rule; hidden, it is the baseline the
+#     LLM is validated against (as the optimized pipeline did on Bosserhof).
+#   * `address` is NOT shown: the model has no lookup at call time and would
+#     invent a tenant. It rides along for validation and mapping.
+#   * three name columns stay separate - `name` (cadastre), `osm_twin_name`
+#     (OSM footprint), `poi_names` (the POIs on it) - so the model knows who
+#     said what. Measured: 1,345 buildings have an OSM footprint name no POI
+#     carries, 1,521 an ALKIS name and nothing else.
+#   * `osm_twin_tag` (ALKIS rows) and `osm_building` (OSM gap rows) are the same
+#     information for the two row kinds and become ONE prompt field, `osm_tag`.
+LLM_COLUMN_ROLES = {
+    # ---- the LLM sees these ------------------------------------------------------
+    "label_en":         ("llm",   "the ALKIS class in English; the strongest single signal for the 15 % of buildings that carry nothing else"),
+    "name":             ("llm",   "the cadastre's own label (Tischlerei, Grundschule, Vereinsheim); OSM name on the gap rows"),
+    "city":             ("llm",   "cheap context: a hall in Wolfsburg reads differently from one in a Harz village"),
+    "area_m2":          ("llm",   "footprint, rounded: kiosk vs hall vs office block"),
+    "height_top_max_m": ("llm",   "height, rounded: one storey vs four"),
+    "osm_twin_tag":     ("llm",   "what OSM calls the footprint on an ALKIS building; merged with osm_building into `osm_tag`"),
+    "osm_building":     ("llm",   "the OSM gap rows' own building tag; merged with osm_twin_tag into `osm_tag`"),
+    "osm_twin_name":    ("llm",   "the name on the OSM footprint, where no POI carries it"),
+    "alkis_landuse":    ("llm",   "what the ALKIS parcel under the centre is for, English"),
+    "alkis_landuse_detail": ("llm", "the parcel's coded kind where ALKIS has one: education and science, health and spa, power plant, campsite, allotment gardens ..."),
+    "osm_landuse":      ("llm",   "what OSM says the land is for; coarser, information only"),
+    "poi_uses":         ("llm",   "the uses of every POI on the building, uncapped"),
+    "poi_names":        ("llm",   "the names of every POI on the building, uncapped - where the model's world knowledge works"),
+    "site_uses":        ("llm",   "the campus or estate the building stands in"),
+    "site_names":       ("llm",   "its name (Volkswagenwerk, Salzgitter Flachstahl, Gewerbegebiet ...)"),
+    # ---- only the model needs these ----------------------------------------------
+    "building_id":      ("model", "the key; goes into the prompt only as a reference to join the answer back"),
+    "alkis_id":         ("model", "the ALKIS key, NULL on OSM rows"),
+    "ags":              ("model", "administrative key for grouping and zone totals"),
+    "function":         ("model", "the AdV code behind label_en"),
+    "volume_3d_m3":     ("model", "the redistribution weight"),
+    "source":           ("model", "alkis or osm: marks the estimated volumes"),
+    "n_pois":           ("model", "batching and QA"),
+    "n_sites":          ("model", "batching and QA"),
+    "address":          ("model", "validation and mapping; not shown - no lookup possible, it would invite invention"),
+    "activities":       ("model", "the rule-based MiD map from the ALKIS class: the BASELINE the LLM is validated against, not shown"),
+    # ---- noise for this step: stays in the step 04 output, does not enter step 05 --
+    "volume_old_m3":    ("drop",  "step 03 QA: the pre-refinement volume"),
+    "volume_ratio":     ("drop",  "step 03 QA"),
+    "height_top_avg_m": ("drop",  "height_top_max_m carries the height"),
+    "height_eaves_max_m": ("drop", "roof geometry, no activity signal"),
+    "roof_shape":       ("drop",  "roof geometry"),
+    "roof_manual_any":  ("drop",  "step 03 provenance"),
+    "roof_fallback_any": ("drop", "step 03 provenance"),
+    "n_parts":          ("drop",  "step 03 provenance"),
+    "is_multipart":     ("drop",  "geometry bookkeeping"),
+    "aaa_class":        ("drop",  "always 31001 or 51xxx; function carries it"),
+    "osm_levels":       ("drop",  "folded into the height estimate on OSM rows"),
+    "osm_height_m":     ("drop",  "folded into the height estimate on OSM rows"),
+    "n_activities":     ("drop",  "derivable from activities"),
+    "poi_main_use":     ("drop",  "derivable from poi_uses and the shares"),
+    "rescued":          ("drop",  "filter provenance the classification must not see"),
+    "rescued_by":       ("drop",  "filter provenance the classification must not see"),
+    "osm_twin_all_structure": ("drop", "filter provenance"),
+    "class_label":      ("drop",  "QGIS legend text"),
+}
+LLM_INPUT_COLS  = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "llm")
+LLM_MODEL_COLS  = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "model")
+LLM_DROPPED_COLS = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "drop")
