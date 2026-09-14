@@ -1624,11 +1624,509 @@ LLM_DROPPED_COLS = tuple(c for c, (r, _) in LLM_COLUMN_ROLES.items() if r == "dr
 # model runs locally, tokens cost nothing but runtime, so records are compact
 # and nothing is sent that is not needed). lib/llm_record.py renders the
 # record: a labelled block whose lines name their SOURCE - inside (the POIs,
-# name paired with use, from the building_pois layer), site, cadastre, osm
-# footprint, land, place - with empty lines omitted and numbers rounded. It is
-# the key=value format the previous pipeline validated, with the POI pairs and
-# the source labels as the improvements. The file below holds every record
+# name paired with the OSM tag as key=value, from the building_pois layer with
+# the key joined from ALL_POIS_FILE - a bare value like `multi` or `it` says
+# nothing), site, cadastre, osm footprint, land, place - with empty lines
+# omitted and numbers rounded. It is the labelled format the previous pipeline
+# validated, with the POI pairs and the source labels as the improvements. The
+# dry run of 2026-09-14 (30 cold runs on 10 records, see the STEP 05.3 block)
+# fixed what the renderer hid: key=value tags, no thousands comma in the area,
+# no cadastre line on OSM gap rows, no line breaks or semicolons inside names.
+# The file below holds every record
 # with the model-only columns beside it, so 05.5 reads a fixed input and the
 # validation can reproduce exactly what the model saw.
 LLM_INPUT_FILE = OUTPUT_DIR / "05_llm_input.parquet"
 LLM_RECORD_SAMPLE_PER_GROUP = 3     # records printed per evidence group in the notebook
+
+
+# --- Step 05.3: the prompt and the output schema ----------------------------------
+# The system prompt is the previous pipeline's, kept where it worked (the twelve
+# label definitions, the Bosserhof catalogue) and changed where the input or the
+# method changed. Decided 2026-09-14, all with approval of the text:
+#   * the input description names the six record lines and their weight; the
+#     old two-part description (precise_known_info / general_building_context)
+#     is gone with the old input;
+#   * nothing about scope or filtering - every record is a building with
+#     activity, and every sentence the model does not need is one it has to
+#     weigh;
+#   * no examples anywhere: definitions only, so the model generalises from
+#     meaning instead of matching the example;
+#   * work is defined as the MiD trip purpose - people come because they are
+#     employed here - without the old paragraph that demanded work next to
+#     every visitor label. The old wording made the model decide, for every
+#     building, whether staff count, and it decided differently each time. The
+#     staff of a shop or school are a fact, not a judgement: WORK_IMPLIED_BY
+#     below adds work by rule to every building with any other label, and the
+#     model's own "work" is kept apart (05.5: work_from = llm | rule | both);
+#   * the Bosserhof class is assigned by understanding, not by clue: form a
+#     picture of the place from the whole record, read what each category
+#     means, choose the one that fits; subcategory only when the record favours
+#     it over its siblings, else the headline; the closest class if nothing
+#     fits well. The old source ordering and dominance heuristic are gone;
+#   * confidence (high / medium / low, disjoint tiers) is new; the reason is
+#     capped at 120 words instead of 400 - on the local model every output
+#     token is runtime, and the reason is for spot checks.
+# Dry run 2026-09-14 before any real call: 30 cold runs (3 per building, each
+# run reads the prompt and one record fresh) on 10 real records covering every
+# evidence group plus the mall, a fire station, a hotel, a church, a hall on an
+# industrial site. Labels identical in 8 of 10 (ignoring work), Bosserhof in 5
+# of 10, confidence in 9 of 10; the mall came back "shopping centers" 3 of 3.
+# The Bosserhof splits were traced to open tests in the wording (medium and low
+# tiers describing the same record; two rules in Part B step 3; a heading word
+# matching a word in the record; a site setting the kind of building) and
+# closed with one sentence each. Stand-ins were a stronger model than the
+# target, so that was an upper bound; the real model on the same ten buildings,
+# three runs each (2026-09-14): labels identical on 6 of 10 (work aside), class
+# on 6 of 10, confidence on 8 of 10 - consistent wherever the record carries
+# evidence, split on the thin records where the data supports two readings.
+LLM_ACTIVITY_LABELS = (
+    "work", "university", "school", "childcare", "retail_daily", "retail_non_daily",
+    "leisure", "sports", "errands", "meetup", "lessons", "business",
+)
+# Work by rule: every building with any of these labels also receives "work".
+WORK_IMPLIED_BY = frozenset(LLM_ACTIVITY_LABELS) - {"work"}
+
+# The Bosserhof catalogue as the prompt lists it: headline -> subcategories (exact
+# strings; a headline with no subcategories is a class of its own). The notebook
+# checks that this and the prompt text agree, so neither can drift alone.
+LLM_BOSSERHOF_SUBCATEGORIES = {
+    "Transport": (),
+    "Yards, depots, storage areas, construction yards": (),
+    "Industrial operations / Production": (
+        "highly productive industries / machine / material or space intensive", "others"),
+    "Crafts and trades": ("craft businesses", "craft courtyards"),
+    "Services": (
+        "normal office", "open-plan office", "business-oriented services",
+        "customer-oriented services", "hotels", "hotels with conference areas",
+        "restaurants / gastronomy", "suppliers for car dealerships",
+        "vehicle / electrical repair", "customer service", "car dealerships"),
+    "Retail": (
+        "wholesale", "retail (small-scale)", "discount stores", "DIY stores",
+        "furniture stores", "hypermarkets / superstores", "shopping centers",
+        "self-service department stores", "department stores", "factory outlet centers"),
+    "Public facilities": (
+        "schools", "universities", "research institutes", "kindergartens", "hospitals", "nursing homes"),
+    "Facilities for culture, leisure and sports": (
+        "entertainment, culture", "large cinemas", "musical theatres",
+        "large discos, fun / leisure pools", "arenas, large events", "theme parks", "fitness / wellness"),
+}
+LLM_BOSSERHOF_HEADLINES = tuple(LLM_BOSSERHOF_SUBCATEGORIES)
+LLM_BOSSERHOF_CLASSES = LLM_BOSSERHOF_HEADLINES + tuple(
+    s for subs in LLM_BOSSERHOF_SUBCATEGORIES.values() for s in subs)
+LLM_CONFIDENCE_LEVELS = ("high", "medium", "low")
+
+# What one answer must look like, for the validation of every reply in 05.5. A
+# reply that fails this is retried, then recorded as failed - never guessed.
+LLM_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "interpreted_type": {"type": "string"},
+        "mid_labels": {"type": "array", "minItems": 1,
+                       "items": {"type": "string", "enum": list(LLM_ACTIVITY_LABELS)}},
+        "bosserhof_class": {"type": "string", "enum": list(LLM_BOSSERHOF_CLASSES)},
+        "confidence": {"type": "string", "enum": list(LLM_CONFIDENCE_LEVELS)},
+        "reason": {"type": "string"},
+    },
+    "required": ["interpreted_type", "mid_labels", "bosserhof_class", "confidence", "reason"],
+    "additionalProperties": False,
+}
+
+# The system prompt, verbatim. Edit it here and nowhere else; section 3 of the
+# notebook prints it and checks it against the lists above.
+LLM_SYSTEM_PROMPT = """\
+You are a building activity interpreter and classifier.
+
+You receive ONE building per message as a short labelled record. Every record
+describes a building in which human activities take place; most buildings
+have one primary use, some have several. Each line names its source; an
+absent line means that source has nothing to say. Read the lines with the
+weight given here:
+
+  inside:        the businesses, institutions and facilities located inside
+                 the building, each as its name followed by its OpenStreetMap
+                 tag in brackets, written key=value. When several share one
+                 tag, the tag is given once with the count and the names after
+                 it. The word unnamed stands where the mapper gave no name; it
+                 is not a name. These are the actual occupants: the strongest
+                 evidence for what happens in the building.
+  site:          the larger complex, campus or estate the building stands in,
+                 as name and tag. Says what the area is for; it supports a
+                 reading of the building, it does not alone say what happens
+                 inside nor what kind of building this is.
+  cadastre:      the official building class from the German land register
+                 (ALKIS) and, introduced by "named", the register's own name
+                 for the building. Reliable about the kind of building,
+                 silent about who occupies it.
+  osm footprint: the building type OpenStreetMap mappers gave the building
+                 and, introduced by "named", the name they gave it. "yes" is
+                 a building with no further description. Weighs the same as
+                 the cadastre.
+  land:          the land-use class of the parcel under the building,
+                 sometimes followed by its more specific kind, and after
+                 "osm:" OpenStreetMap's land use for the same ground. Context
+                 for the surroundings.
+  place:         municipality, footprint area in square metres and height in
+                 metres. Size says how large an activity is, never which
+                 activity; in Part B it separates subcategories that differ
+                 by scale.
+
+Names carry world knowledge: wherever a name appears, use what you know about
+the chain, institution, company or facility it refers to.
+
+You must produce TWO outputs:
+1) Activity labels (mid_labels) → the purposes for which people come to the building
+2) Bosserhof class → the dominant functional building-use class for capacity / volume estimation
+
+────────────────────────────────────
+PART A — ACTIVITY LABELS
+────────────────────────────────────
+
+ALLOWED ACTIVITY LABELS
+- work
+- university
+- school
+- childcare
+- retail_daily
+- retail_non_daily
+- leisure
+- sports
+- errands
+- meetup
+- lessons
+- business
+
+PROCEDURE:
+1) List every distinct purpose people come to this building for, from the
+   inside line first, then from the names. A building hosts as many
+   activities as there are distinct purposes; one occupant can serve one
+   purpose or several, and several occupants of different kinds serve
+   several.
+2) Map each purpose to one or more labels using the definitions below and
+   return every label found. A label is added only when the purpose meets
+   that label's core idea; a purpose that only brushes a second label does
+   not receive it. Do not collapse several purposes into one and do not stop
+   at the first.
+3) If the record has no inside line and no name for the building itself,
+   take the purposes that the kind of building and its land use imply by
+   their nature; when the kind of building covers several purposes, list a
+   label for each of them rather than choosing one. Every building receives
+   at least one label.
+
+────────────────────────────────────
+LABEL DEFINITIONS
+────────────────────────────────────
+
+- work
+
+Represents employment: people come here because this is their regular place of work.
+Covers gainful work of every kind carried out in the building - production, crafts,
+office and administration, logistics, research, services, care, teaching, operations
+Describes the purpose of the people employed in the building, not the purpose of its visitors
+Distinct from "business", which is a visitor's professional errand at a place that is not their own workplace
+Core idea: "People come here because they are employed here."
+
+- university
+
+Represents tertiary/higher-level education activity.
+Covers structured learning, teaching, and research at the higher education level
+Involves academic instruction, research, and study environments
+Distinct from general learning by its institutional and advanced nature
+Core idea: “Advanced academic education and research happen here.”
+
+- school
+
+Represents formal compulsory or pre-tertiary education activity.
+Covers structured education for children and adolescents
+Includes general and vocational schooling
+Defined by curriculum-based learning under institutional supervision
+Core idea: “Children or teenagers receive structured education here.”
+
+- childcare
+
+Represents supervision and early development care for young children.
+Focuses on care, supervision, and early-stage development
+Not primarily academic or curriculum-driven (unlike school)
+Strong emphasis on custodial and developmental support
+Core idea: “Young children are cared for and supervised here.”
+
+- retail_daily
+
+Represents frequent, necessity-driven consumption activity.
+Covers acquisition of essential, regularly needed goods
+Characterized by high frequency and routine visits
+Typically tied to basic living needs
+Core idea: “People come here regularly to fulfill essential daily needs.”
+
+- retail_non_daily
+
+Represents infrequent, discretionary consumption activity.
+Covers acquisition of non-essential or durable goods
+Visits are planned, occasional, or need-based
+Often involves comparison, browsing, or larger purchases
+Core idea: “People come here occasionally to buy non-essential or long-term goods.”
+
+- leisure
+
+Represents hedonic, relaxation, or enjoyment-oriented activity.
+Focuses on free-time use driven by pleasure, comfort, or experience
+Includes passive or active enjoyment, but not primarily goal-oriented tasks
+Distinguished by non-obligatory participation. People choose to go here for enjoyment, not out of necessity or obligation.
+Core idea: “People come here to relax, enjoy, or spend free time.”
+
+- sports
+
+Represents physical activity, exercise, or bodily training.
+Focuses on intentional physical exertion or fitness improvement
+Can be recreational or structured, but always movement-centered
+Distinguished from leisure by physical intensity and purpose
+Core idea: “People come here to be physically active or train their body.”
+
+- errands
+
+Represents task-oriented, functional activities needed for daily life management.
+Covers practical obligations or maintenance tasks
+Typically short, goal-driven visits with a clear outcome
+Often involves services, administration, or personal maintenance
+Core idea: “People come here to complete necessary tasks or obligations.”
+
+- meetup
+
+Represents social interaction and gathering activity.
+Focuses on interpersonal connection and shared presence
+Can be informal or organized, but the primary purpose is social exchange
+Not necessarily tied to consumption or formal structure
+Core idea: “People come here to meet and interact with others.”
+
+- lessons
+
+Represents structured instruction or skill acquisition activity.
+Focuses on learning guided by an instructor
+Can occur at any level (formal or informal), but always organized and instructional
+Distinguished from general education by activity type (learning session), not institution
+Core idea: “People come here to learn something through instruction.”
+
+- business
+
+Represents professional or organizational interaction activity (non-routine workplace).
+Covers goal-oriented professional interactions, often external-facing
+Includes meetings, consulting, administrative dealings, or formal exchanges
+Distinct from "work" because it reflects the visitor’s purpose, not employment
+Core idea: “People come here for professional or organizational matters.”
+
+────────────────────────────────────
+PART B — BOSSERHOF BUILDING-USE CLASS
+────────────────────────────────────
+
+GOAL
+Assign EXACTLY ONE Bosserhof class.
+
+KEY PRINCIPLE:
+Bosserhof is NOT about the activities of visitors — it is about what kind of
+place the building is as a whole: its dominant use, its scale and the way it
+is operated.
+
+PROCEDURE:
+1) Form a picture of the place from the whole record: what is located inside
+   it, what its names tell you, what kind of building the cadastre and the
+   footprint describe, what the surrounding land is used for, how large it
+   is. No single line is decisive; the picture is what all of them together
+   most plausibly describe. A building with many occupants of one kind is a
+   place of that kind at a larger scale, not a collection of small ones.
+2) Read the category meanings below and ask which of them describes a place
+   like that. The sentence under each heading is the meaning; the heading is
+   only a label, and a word in the record that happens to match a heading
+   does not by itself place the building there.
+3) Choose the subcategory whose meaning fits the picture. A subcategory is
+   chosen only when the record says something that favours it over its
+   sibling subcategories; when the record does not let you tell them apart,
+   choose the headline category. If no category fits well, choose the
+   closest one; a class is always assigned.
+
+────────────────────────────────────
+BOSSERHOF CATEGORIES AND WHAT THEY MEAN
+────────────────────────────────────
+
+1) Transport
+A building operated to move people or goods, with staff working in it.
+- no fixed subcategories given
+
+2) Yards, depots, storage areas, construction yards
+A building or yard whose purpose is to keep, sort and dispatch material or
+vehicles, with staff working in it.
+- no fixed subcategories given
+
+3) Industrial operations / Production
+A building in which goods are manufactured or processed at industrial scale.
+Subcategories:
+- highly productive industries / machine / material or space intensive
+- others
+
+4) Crafts and trades
+A building in which skilled manual work is carried out by a small business,
+making, installing or repairing things.
+Subcategories:
+- craft businesses
+- craft courtyards
+
+5) Services
+A building in which people are served or in which office work is done:
+administration, professional services, hospitality, personal and customer
+services, vehicle sales and repair.
+Subcategories:
+- normal office
+- open-plan office
+- business-oriented services
+- customer-oriented services
+- hotels
+- hotels with conference areas
+- restaurants / gastronomy
+- suppliers for car dealerships
+- vehicle / electrical repair
+- customer service
+- car dealerships
+
+6) Retail
+A building in which goods are sold. The subcategories differ by the scale of
+the building and by the range and kind of goods; the largest ones house many
+shops under one roof.
+Subcategories:
+- wholesale
+- retail (small-scale)
+- discount stores
+- DIY stores
+- furniture stores
+- hypermarkets / superstores
+- shopping centers
+- self-service department stores
+- department stores
+- factory outlet centers
+
+7) Public facilities
+A building run by or for the public for education, research, health or care.
+Subcategories:
+- schools
+- universities
+- research institutes
+- kindergartens
+- hospitals
+- nursing homes
+
+8) Facilities for culture, leisure and sports
+A building people visit in their free time for culture, entertainment,
+recreation or exercise. The subcategories differ by the kind of experience
+and by the size of the audience the building is built for.
+Subcategories:
+- entertainment, culture
+- large cinemas
+- musical theatres
+- large discos, fun / leisure pools
+- arenas, large events
+- theme parks
+- fitness / wellness
+
+────────────────────────────────────
+OUTPUT FORMAT (STRICT JSON ONLY)
+────────────────────────────────────
+
+{
+  "interpreted_type": "<plain-English description of what the place most likely is>",
+  "mid_labels": ["<one or more activity labels from the allowed list>"],
+  "bosserhof_class": "<exactly one Bosserhof class, exact string from the list>",
+  "confidence": "<high | medium | low>",
+  "reason": "<max 120 words. Explain both classifications, naming the record lines and names you used. Justify the Bosserhof choice.>"
+}
+
+bosserhof_class is one dash line from the list copied unchanged, or the name
+of a headline category without its number; never the two combined.
+
+confidence:
+- high   → an inside line, or a name of the building itself or of an occupant
+           whose meaning you know, decides both outputs; a site name alone
+           does not make it high
+- medium → no occupant known, but the cadastre class or footprint type says
+           what kind of building this is
+- low    → the cadastre and footprint say no more than that it is a building;
+           only land use and size remain
+"""
+
+# --- Step 05.4: routing ---------------------------------------------------------------
+# One call per building wherever the record carries evidence of its own - a POI,
+# a site, a name, an activity tag: 33,734 buildings. The 6,052 class_only
+# buildings carry nothing but a register class, a footprint type ('yes' or
+# none), the land use and a size; two such buildings with the same class, land
+# and size band are the same question, and asking it twice can only produce two
+# answers. They are grouped into signatures - class, footprint type, ALKIS land
+# use and its kind, OSM land use, footprint-area band, height band - and each
+# signature is asked once, on the record of its median-area member; the answer
+# is copied to every member in the assembly and marked route='signature'. The
+# bands keep the size the prompt uses for scale: within one band the footprint
+# varies by at most a factor of two and the height by one storey band.
+# Measured 2026-09-14: 1,259 signatures for 6,052 buildings (808 of them a
+# single building), 4,793 calls saved, 34,993 calls in total. The saving is
+# modest; the consistency is the point - identical evidence, identical answer.
+LLM_SIGNATURE_AREA_BINS_M2 = (250, 500, 1000, 2500)
+LLM_SIGNATURE_HEIGHT_BINS_M = (5, 10, 20)
+LLM_PLAN_FILE = OUTPUT_DIR / "05_llm_plan.parquet"
+
+# --- Step 05.5: the calls -------------------------------------------------------------
+# Transport as in the previous pipeline (llm_utils.call_tu_llm): one stateless
+# POST per building to the TU Braunschweig KI-Toolbox, the system prompt sent as
+# customInstructions every time, the streamed reply assembled from its chunks.
+# The endpoint takes the system prompt and the one record and nothing else: it
+# has no reasoning or temperature setting (the previous pipeline sent a
+# "reasoning" field; the endpoint ignored it, so it is not sent any more).
+# Every building is asked once. The token is read from the environment or
+# ROOT/.env (TU_KI_TOOLBOX_TOKEN=...) at call time, never at import, never
+# printed; .env is git-ignored.
+LLM_API_URL = "https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send"
+LLM_MODEL = "gpt-oss-120b"
+LLM_TIMEOUT_S = 180
+LLM_TOKEN_ENV = "TU_KI_TOOLBOX_TOKEN"
+LLM_ENV_FILE = ROOT / ".env"
+# Every reply is checked the moment it arrives - parsed as JSON, validated
+# against LLM_OUTPUT_SCHEMA - and the building is asked again at once when the
+# check fails, so no failed row waits for a later sweep. Two failure kinds, two
+# medicines: a transport failure (timeout, connection error, HTTP error) waits
+# with a growing pause and sends the same text again; an invalid reply (no JSON,
+# an unknown class string, an empty label list) is re-asked with the validation
+# error appended to the record. After LLM_MAX_ATTEMPTS the building is written
+# as failed with its error and the raw reply, and the run moves on; a re-run
+# resumes exactly there, because only valid answers count as done.
+LLM_MAX_ATTEMPTS = 4
+LLM_BACKOFF_S = (5, 20, 60)       # pause before attempt 2, 3, 4 after a transport failure
+LLM_RATE_LIMIT_PAUSE_S = 120      # HTTP 429: the previous pipeline saw fast retries hit the same wall
+LLM_MAX_WORKERS = 1               # requests at a time; the rate limit is undocumented - raise only after asking the operators
+# Progress: every answer is appended to a JSON-lines file the moment it is
+# validated (one line per call, flushed and synced), so a crash loses nothing
+# and a re-run skips what is done. Each line carries the prompt's hash, so a
+# resumed run never mixes answers given under an earlier prompt. In a terminal
+# one progress line is redrawn after every call; every LLM_STATUS_EVERY_S
+# seconds a status block - done/total, rate, ETA, failures, retries, confidence
+# and class mix so far, the last answer - goes to the log and, as JSON, to
+# LLM_STATUS_FILE for a second terminal. scripts/05_run_llm.py is the runnable
+# entry point for the machine that stays on.
+LLM_ANSWERS_FILE = OUTPUT_DIR / "05_llm_answers.jsonl"
+LLM_SAMPLE_ANSWERS_FILE = OUTPUT_DIR / "05_llm_sample_answers.jsonl"
+LLM_STATUS_FILE = OUTPUT_DIR / "05_llm_status.json"
+LLM_STATUS_EVERY_S = 60
+# The sample before anything larger runs: the ten dry-run buildings of
+# 2026-09-14 (every evidence group, the mall, a fire station kept by its ALKIS
+# name, a hotel and a hall known only from their site, a church, a supermarket
+# with tenants), once each - the payload, the parsing, the validation, the
+# checkpoint and the progress exercised end to end, and the seconds per call
+# setting the runtime of the full run. A one-off check on 2026-09-14 asked the
+# same ten three times each: labels identical on 6 of 10 (work aside), class on
+# 6 of 10, confidence on 8 of 10, 7.9 s per call, the splits on the thin records
+# where the data supports two readings. The run itself asks every building once.
+LLM_SAMPLE_BUILDING_IDS = (
+    "DENIAL01000051rg",   # school gym, sport=multi inside, school site          (poi_or_site)
+    "DENIAL0500001k2b",   # parish hall, cadastre name only                     (name_only)
+    "DENIAL0500002x1U",   # trade and services with housing, footprint residential (tag_only)
+    "DENIAL0100006qgY",   # business or commerce, nothing else                  (class_only)
+    "DENIAL0100005xF6",   # Schloss-Arkaden, the longest record
+    "DENIAL8400006PFM",   # fire station, 57 m2, ALKIS name only
+    "DENIAL030000a7oe",   # hotel block known from its site and footprint type
+    "DENIAL0500000IY1",   # small hall on the Alstom site
+    "DENIAL0600001xHZ",   # church
+    "DENIAL060000cAhb",   # Marktkauf with kiosk and bakery
+)
