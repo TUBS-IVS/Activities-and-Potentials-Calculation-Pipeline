@@ -153,7 +153,8 @@ ALKIS_LANDUSE_LABELS_EN = {
 # and the business-first mixed codes with housing (2310, 2320, 3100) are NOT in
 # the rule: there the code itself is the information, and together they held
 # 127 such buildings across 20 classes. "Nothing describes" means: no
-# POI, no site, no OSM twin name, and the twin footprint (if any) is mute - a
+# POI, no site, no OSM twin name, no ALKIS name (since 2026-09-14), and the twin
+# footprint (if any) is mute - a
 # bare 'yes', a residential or farm tag from OSM_DROP_UNLESS_POI (house,
 # apartments, barn, stable, ...) or a structure tag from OSM_TWIN_STRUCTURE_TAGS.
 # For class 2000 the rule starts at ALKIS_SIZE_FLOOR_EVIDENCE_M2, below which the
@@ -910,20 +911,19 @@ ALKIS_ALLOW_EMPTY_COLS = ["functions_all"]
 #
 # THE FILTER LADDER (section 7 of the notebook), in the order the reasons are
 # assigned - a building gets the FIRST reason that applies, `drop_reason` on
-# the labelled extract, NULL when kept. State on 2026-09-11 (OSM 260910):
-# 869,316 ALKIS + 50,011 OSM gap-fill = 919,327 polygons in, 49,297 out.
+# the labelled extract, NULL when kept. State on 2026-09-14 (OSM 260910):
+# 869,316 ALKIS + 50,011 OSM gap-fill = 919,327 polygons in, 39,786 out.
 #
 #   list1                     ALKIS_DROP_ALWAYS / OSM_DROP_ALWAYS: canopies, masts,
 #                             garages, sheds, roofs, towers ... no POI can save them
-#   floor_structure           class 2000 under ALKIS_SIZE_FLOOR_M2 whose OSM twin is
-#                             in OSM_TWIN_STRUCTURE_TAGS: goes with list 1
+#   floor_structure           any class under SIZE_FLOOR_M2 whose OSM twin is in
+#                             OSM_TWIN_STRUCTURE_TAGS: goes with list 1
 #   list2_no_poi              ALKIS_DROP_UNLESS_POI / OSM_DROP_UNLESS_POI (residential,
 #                             farm, bare 'yes' ...) with no POI or site on them
-#   floor_no_poi              class 2000 under ALKIS_SIZE_FLOOR_M2, nothing on it
-#                             (an OSM_TWIN_ACTIVITY_TAGS twin keeps it)
-#   floor_no_evidence         class 2000 between the floor and
-#                             ALKIS_SIZE_FLOOR_EVIDENCE_M2 with no POI, site, activity
-#                             twin or named twin
+#   floor_no_evidence         any class under SIZE_FLOOR_M2 with no POI, site,
+#                             activity tag, OSM name or ALKIS name
+#   band_no_evidence          class 2000 between the floor and
+#                             ALKIS_SIZE_FLOOR_EVIDENCE_M2 with none of those
 #   land_residential_or_farm  ALKIS_LANDUSE_RULE_CLASSES with a mute twin, no POI,
 #                             site or name, on ALKIS_LANDUSE_DROP land
 #   twin_structure_no_poi     every OSM footprint on it in OSM_TWIN_STRUCTURE_TAGS,
@@ -932,7 +932,8 @@ ALKIS_ALLOW_EMPTY_COLS = ["functions_all"]
 # What saves a building (`rescued_by`): poi (inside), snap (a building-bound
 # POI within POI_SNAP_MAX_DISTANCE_M, see POI_BUILDING_BOUND_MIN_INSIDE_SHARE),
 # site (inside a site polygon of POI_SITE_RESCUE_MIN_AREA_M2 or more), osm_tag
-# (an OSM_TWIN_ACTIVITY_TAGS twin), osm_name (a named twin). Kept buildings
+# (an OSM_TWIN_ACTIVITY_TAGS twin), osm_name (a named twin), alkis_name (the
+# cadastre named it). Kept buildings
 # then receive their POIs with shares (04.5) and are written to
 # ENRICHED_BUILDINGS_FILE; OSM gap-fill rows carry an estimated volume
 # (OSM_GAP_FLOOR_HEIGHT_M). The three QGIS extracts are LABELLED_INSPECT_FILE
@@ -1334,11 +1335,54 @@ POI_BUILDING_BOUND_MIN_INSIDE_SHARE = 0.5
 #                            all: goes unless a POI or site is on it (list-2 rule).
 #                            This is what keeps the small building that belongs
 #                            to a business but carries no tag of its own.
-# Keyed by function code so a floor can be given to another class later.
-ALKIS_SIZE_FLOOR_M2 = {"31001_2000": 100.0}
+#
+# 2026-09-14, decided with the user: THE SAME FLOOR FOR EVERY CLASS, and EVIDENCE
+# widened. Measured on the kept layer: 12,372 buildings under 100 m2 were still
+# in it (25 % by count, 1.1 % by volume, median 42 m2 and 3.8 m) - garages,
+# storage and utility rooms of businesses coded 2010/2100/3000/3200, the hose
+# tower behind a fire station. Below the floor a building of ANY class now
+# stays only if something speaks for it:
+#   a POI on it (inside or snapped), a site around it (POI_SITE_RESCUE_MIN_AREA_M2),
+#   an activity tag on its OSM footprint (OSM_TWIN_ACTIVITY_TAGS; for OSM gap
+#   rows their own building tag), a name on the OSM footprint, or an ALKIS name
+#   (`name` on the cadastre record: Vereinsheim, Sportheim, Feuerwehr, DLRG).
+# The ALKIS name is new as evidence and counts in the evidence band and the
+# land-use rule too: the most specific information a row has is what the LLM
+# classifies from, so it must not be dropped for being small. Structure twins
+# below the floor still go with list 1 (floor_structure). Estimated before the
+# run: 5,373 go, 1.12M m3 = 0.40 % of the layer; 6,999 stay.
+SIZE_FLOOR_M2 = 100.0
+
+# ALKIS names that are NOT evidence. The cadastre sometimes labels a structure by
+# what it is - Silos, Gas, Guelle (slurry), Pumpwerk, Waage, WC, Tor 3 - and such
+# a name says nothing about people inside. Measured 2026-09-14 on the 265
+# buildings an ALKIS name alone had kept: about 60 carried names like these,
+# the rest were Vereinsheim (48), Sportheim, Tennisheim, Feuerwehr, DLRG, DRK,
+# Gemeindehaus, Kapelle, Imbiss, Arztpraxis - exactly what the rescue is for.
+# Matched on the lower-cased name: the whole name, or its first word, is in the
+# set (so 'Tor 3', 'Sammelbehaelter Waage' and 'Schacht Hannoversche Treue I'
+# match). Applies only to the rescue; the name stays on the row for the LLM.
+ALKIS_NAME_NOT_EVIDENCE = frozenset({
+    # tanks, silos, gas, fuel
+    "silo", "silos", "gas", "gastank", "gasometer", "gasstation", "gasreglerstation",
+    "öltanks", "öltank", "tankanlage", "gülle", "güllebehälter", "sammelbehälter",
+    # pumps, plant, technical rooms
+    "pumpwerk", "abwasserpumpwerk", "pumpenhaus", "brunnenhaus", "wärmetauscher",
+    "kühlanlage", "klimastation", "trafo", "trafostation", "umspannwerk",
+    # yard structures
+    "waage", "wc", "container", "bürocontainer", "ausfahrt", "einfahrt", "kasse", "tor",
+    "förderband", "kippanlage", "aschebunker", "bunker", "sanitäranlage", "abstellraum",
+    "pool", "baumhaus", "schacht", "schuppen", "garage", "garagen", "carport", "lager",
+    # towers and memorials
+    "übungsturm", "aufsichtsturm", "kampfrichterturm", "ehrenmal", "grabstätte",
+    "erbgruft", "mausoleum",
+    # abbreviations that are not a use
+    "ter.", "schwb.", "wbh", "(kath.)", "(ev.)",
+})
 # The EVIDENCE BAND (decided 2026-09-11): at or above the floor but under this,
 # a building stays only if something speaks for it - a POI or site on it, an
-# activity tag on its OSM twin, or a name on the twin. (An ALKIS address was
+# activity tag on its OSM twin, a name on the twin, or (since 2026-09-14) an
+# ALKIS name. (An ALKIS address was
 # tried too and rejected: it proves a mailbox, not an activity, and the LLM
 # cannot classify from it.) Above
 # the floor class 2000 still held 19,517 buildings with none of those (bare
