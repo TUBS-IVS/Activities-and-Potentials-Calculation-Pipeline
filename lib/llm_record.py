@@ -106,7 +106,9 @@ def _format_sites(sites: pd.DataFrame) -> str:
 def build_record(row, pairs: pd.DataFrame) -> str:
     """Render one building. `row` is its buildings-layer row, `pairs` its rows of the
     building_pois layer (may be empty). Lines with nothing to say are left out."""
-    lines = [f"building {row['building_id']}"]
+    # No id line: one building per call, the answer is joined by position, and the
+    # id would only be a token string the model might try to read something into.
+    lines = []
 
     own = pairs[pairs["poi_role"] != "site"] if len(pairs) else pairs
     sites = pairs[pairs["poi_role"] == "site"] if len(pairs) else pairs
