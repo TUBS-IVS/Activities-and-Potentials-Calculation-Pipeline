@@ -1665,7 +1665,49 @@ LLM_RECORD_SAMPLE_PER_GROUP = 3     # records printed per evidence group in the 
 #     fits well. The old source ordering and dominance heuristic are gone;
 #   * confidence (high / medium / low, disjoint tiers) is new; the reason is
 #     capped at 120 words instead of 400 - on the local model every output
-#     token is runtime, and the reason is for spot checks.
+#     token is runtime, and the reason is for spot checks;
+#   * the Retail meaning says what a shopping centre is (2026-09-15): many
+#     separate shops, on the order of ten or more, or a tag or name that says
+#     centre or mall; a large store with a handful of units at its entrance
+#     keeps the store's class. Before this, a Marktkauf with a kiosk and a
+#     bakery came back "shopping centers" four times out of four, and 207
+#     kept buildings carry that pattern (a supermarket with 2-4 inside entries).
+#     A second sentence ties the store classes to the building's size, after
+#     the same Marktkauf (8,729 m2) once came back "retail (small-scale)";
+#   * Part A step 1 says a building that belongs to an organisation also
+#     serves the organisation's purpose (2026-09-15), so a school's sports
+#     hall carries "school" next to "sports", not "sports" alone.
+#   * a building inside the premises of a company or institution takes the
+#     class of what that organisation does (2026-09-15): the school's sports
+#     hall is "schools", because its users are the school's pupils, not a
+#     gym's members, and the same holds for every hall, canteen and workshop
+#     on a campus or a plant. The test is the site's NAME, not its tag: the
+#     region's big employers are mapped as landuse=industrial with the company
+#     name on it - Salzgitter Flachstahl 402 kept buildings, PTB 109, Peiner
+#     Träger 94, VW Salzgitter 80, Alstom 66, JKI 53, MAN 43 - 2,506 kept
+#     buildings inside company-named sites, 2,151 of them with no POI of their
+#     own. A site named only as an area or estate (Gewerbegebiet ..., 2,107
+#     buildings), or unnamed, gives no class. Said in the site line's
+#     description, in Part B step 1 (the building belongs to the organisation)
+#     and as the FIRST test of Part B step 3 (the class is the organisation's,
+#     even when the building's own tag fits another category). The last place
+#     matters: stated only in step 1, the rule lost to "choose the meaning
+#     that fits the picture" in two of four runs on a school's sports hall
+#     tagged sport=multi - the model saw the school every time and still
+#     picked fitness / wellness when nothing said which instruction wins.
+# Decided 2026-09-15 after the sample on the real model: thin records (class,
+# land, size only) are asked and their answer taken as it comes - there is no
+# other way to enrich them, they are too many to drop, and they are mostly
+# rural with little to redistribute; churches, fire stations and halls take
+# the nearest class - Public facilities, culture or Services - and no class is
+# added for them (decided 2026-09-15; in the hundred-building review three
+# churches split 2:1 and two fire stations 1:1, accepted); the model's own
+# "work" must appear wherever nothing else applies, and does (step 3 of Part
+# A), the rule covers the rest.
+# What the classification is judged on, in this order: is it correct, is it
+# complete (no activity missed), is it reproducible - the last being a wish
+# with a non-deterministic model, and given by construction for the
+# signature-routed buildings.
 # Dry run 2026-09-14 before any real call: 30 cold runs (3 per building, each
 # run reads the prompt and one record fresh) on 10 real records covering every
 # evidence group plus the mall, a fire station, a hotel, a church, a hall on an
@@ -1750,9 +1792,12 @@ weight given here:
                  is not a name. These are the actual occupants: the strongest
                  evidence for what happens in the building.
   site:          the larger complex, campus or estate the building stands in,
-                 as name and tag. Says what the area is for; it supports a
-                 reading of the building, it does not alone say what happens
-                 inside nor what kind of building this is.
+                 as name and tag. A site named after a company or an
+                 institution, or tagged as a facility, is that organisation's
+                 premises: the building is part of it, serves it and belongs
+                 to its kind. A site whose name is only that of an area or an
+                 estate, or that has no name, says what the ground is zoned
+                 for and nothing about the building itself.
   cadastre:      the official building class from the German land register
                  (ALKIS) and, introduced by "named", the register's own name
                  for the building. Reliable about the kind of building,
@@ -1800,7 +1845,9 @@ PROCEDURE:
    inside line first, then from the names. A building hosts as many
    activities as there are distinct purposes; one occupant can serve one
    purpose or several, and several occupants of different kinds serve
-   several.
+   several. A building that belongs to an institution or a company also
+   serves that organisation's purpose, so the organisation's activity is
+   among the building's.
 2) Map each purpose to one or more labels using the definitions below and
    return every label found. A label is added only when the purpose meets
    that label's core idea; a purpose that only brushes a second label does
@@ -1931,16 +1978,22 @@ PROCEDURE:
    footprint describe, what the surrounding land is used for, how large it
    is. No single line is decisive; the picture is what all of them together
    most plausibly describe. A building with many occupants of one kind is a
-   place of that kind at a larger scale, not a collection of small ones.
+   place of that kind at a larger scale, not a collection of small ones. A
+   building inside the premises of a company or an institution is a building
+   of that organisation; a site that is only a zoned area or an estate says
+   nothing about the building.
 2) Read the category meanings below and ask which of them describes a place
    like that. The sentence under each heading is the meaning; the heading is
    only a label, and a word in the record that happens to match a heading
    does not by itself place the building there.
-3) Choose the subcategory whose meaning fits the picture. A subcategory is
-   chosen only when the record says something that favours it over its
-   sibling subcategories; when the record does not let you tell them apart,
-   choose the headline category. If no category fits well, choose the
-   closest one; a class is always assigned.
+3) If the building stands in the premises of a company or an institution,
+   choose the class for what that organisation does, even when the building's
+   own tag would fit another category on its own. Otherwise choose the
+   subcategory whose meaning fits the picture. A subcategory is chosen only
+   when the record says something that favours it over its sibling
+   subcategories; when the record does not let you tell them apart, choose
+   the headline category. If no category fits well, choose the closest one;
+   a class is always assigned.
 
 ────────────────────────────────────
 BOSSERHOF CATEGORIES AND WHAT THEY MEAN
@@ -1987,8 +2040,13 @@ Subcategories:
 
 6) Retail
 A building in which goods are sold. The subcategories differ by the scale of
-the building and by the range and kind of goods; the largest ones house many
-shops under one roof.
+the building and by the range and kind of goods. A shopping centre is a
+building whose purpose is to house many separate shops, on the order of ten or
+more, or one whose own tag or name says it is a centre or a mall; a large store
+with a handful of small shops at its entrance keeps the class of that store.
+For one store the size of the building sets the scale: a small building is
+small-scale retail, a very large one a hypermarket or superstore; what the
+store's name is known for decides between the store classes.
 Subcategories:
 - wholesale
 - retail (small-scale)
