@@ -271,7 +271,7 @@ def run(building_ids, records: dict, answers_file, *, label: str = "run", worker
                 os.fsync(f.fileno())
                 progress.add(a)
                 if live_bar:
-                    sys.stdout.write("\r" + progress.bar())
+                    sys.stdout.write("\r" + progress.bar() + "\x1b[K")     # clear what a longer earlier line left behind
                     sys.stdout.flush()
                     bar_shown = True
                 if time.time() >= next_block or progress.n == progress.total or progress.n == 1:
