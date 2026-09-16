@@ -7,9 +7,15 @@ data/input/*
 
 data/output/*
 !data/output/.gitkeep
-!data/output/llm_predictions/
-data/output/llm_predictions/*
-!data/output/llm_predictions/.gitkeep
+
+# Throwaway layers made to be looked at in QGIS and then rewritten. Regenerated
+# by notebook 03, hundreds of MB, never an input to anything.
+data/experimental_extract/*
+!data/experimental_extract/.gitkeep
+
+# Reference tables are user-supplied region data, not code.
+data/reference/*
+!data/reference/.gitkeep
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

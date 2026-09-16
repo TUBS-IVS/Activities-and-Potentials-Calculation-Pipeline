@@ -1,0 +1,22 @@
+# The conda environment of the server (exported 2026-09-16 with --from-history).
+# The run itself (scripts/05_run_llm.py) needs only pandas, pyarrow and requests;
+# notebook 05 needs pyogrio and numpy as well; the rest is for steps 01-04 on the
+# laptop and kept so both machines share one environment definition.
+name: capacity-final
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - pandas
+  - pyarrow
+  - requests
+  - pyogrio
+  - numpy
+  - geopandas
+  - shapely
+  - pyproj
+  - gdal
+  - pyrosm
+  - osmium-tool
+  - jupyter
+  - ipykernel
