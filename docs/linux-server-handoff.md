@@ -16,7 +16,7 @@ laptop and their inputs and outputs were moved out of this clone.
 - restart the run after a reboot or a closed window → "Launching, watching, resuming";
 - bring the results to the laptop and start 05.6 → "Linux → Windows";
 - redo notebook 05 here after a new step-04 build → "Windows → Linux";
-- decide the fate of the quarantined 9.5 GB → "The cleanup of 2026-09-16".
+- find out where a step 01–04 file went and where it comes from → "The cleanup of 2026-09-16".
 
 The run of 2026-09-15/16 is under **prompt `795433ed9feb`** (the first twelve
 hex characters of the SHA-1 of `LLM_SYSTEM_PROMPT` in `config.py` at commit
@@ -243,12 +243,11 @@ process alive before and after). Repo: 9.6 GB → 66 MiB.
 laptop produced an identical one) and the `__pycache__/` folders (which come
 back on the next import).
 
-**Moved — not deleted — to `~/Documents/pipeline-quarantine-2026-09-16/`**,
-same relative paths under two subfolders, because they are step 01–04 inputs
-and outputs that git cannot restore:
+**Removed from the server** (first moved to a quarantine folder, then deleted
+the same day once the laptop copies were confirmed). The table stays as the
+provenance record of what the laptop holds and where each file came from:
 
-`recoverable/` — re-downloadable or regenerable; purge once the laptop copy is
-confirmed **by exact byte count**:
+Re-downloadable or regenerable:
 
 | file | bytes | source, and whether it was still there on 2026-09-16 |
 |---|---|---|
@@ -262,22 +261,14 @@ confirmed **by exact byte count**:
 | `data/output/01_landuse_osm.gpkg` | 25,759,744 | notebook 01 |
 | `data/output/02_lod2_region_tiles.gpkg` | 1,642,496 | notebook 02's tile-selection cell, seconds |
 
-`irreplaceable/` — the two Geofabrik daily snapshots. Geofabrik keeps dated
-files for about a week (on 2026-09-16 it listed the dailies 260909–260915,
-the monthlies and the 1-January yearlies only). **Never purge this folder**
-unless the laptop copy has been verified by byte count:
+The two Geofabrik daily snapshots. Geofabrik keeps dated files for about a
+week (on 2026-09-16 it listed the dailies 260909–260915, the monthlies and
+the 1-January yearlies only), so the laptop copies are the reference:
 
 | file | bytes | status |
 |---|---|---|
 | `data/input/niedersachsen-260910.osm.pbf` | 504,682,810 | `OSM_PBF_FILE`, the snapshot every output of this study is built on. Online on 2026-09-16, gone within days. The laptop has it (notebook 01's committed output shows it) — verify the size |
-| `data/input/niedersachsen-260113.osm.pbf` | 478,239,569 | the January snapshot the study started on; already **404** at Geofabrik. Referenced only by the comment at `config.py:40` (between the two snapshots the region gained 4 % POI-tagged objects and 1.4 % footprints). No committed output ever shows it on the laptop, so this may be the only copy |
-
-Restore anything with `mv` back to the same relative path in the repo. Purge
-the recoverable half, once the laptop copies are verified, with:
-
-```bash
-rm -rf ~/Documents/pipeline-quarantine-2026-09-16/recoverable
-```
+| `data/input/niedersachsen-260113.osm.pbf` | 478,239,569 | the January snapshot the study started on; already **404** at Geofabrik. Referenced only by the comment at `config.py:40` (between the two snapshots the region gained 4 % POI-tagged objects and 1.4 % footprints). Deleted from the server on 2026-09-16 by decision: every result was rebuilt on the 2026-09-10 snapshot, so the January file is not needed |
 
 **Also done:** `git checkout` of notebooks 01, 02 and 03 (only cell outputs
 from the runs here differed; sources verified identical to HEAD, whose 01 and
