@@ -2188,3 +2188,41 @@ LLM_SAMPLE_BUILDING_IDS = (
     "DENIAL0600001xHZ",   # church
     "DENIAL060000cAhb",   # Marktkauf with kiosk and bakery
 )
+
+# ──────────────────────────────────────────────
+# STEP 06 — assembly: the LLM answers on the building polygons
+# ──────────────────────────────────────────────
+# Reads the step 04 buildings, the step 05 plan and the answers of the full run
+# (valid under the current prompt only) and gives every polygon its classes.
+# No model call is made. Decided with the user 2026-09-23:
+#   * signatures: every class_only building gets the answer of its
+#     signature's representative; `answer_copied` marks the 4,793 buildings
+#     whose answer was given for another building's record;
+#   * the work rule is applied here: `llm_labels` keeps the model's labels as
+#     it gave them, `mid_labels` is what later steps use - the model's labels
+#     plus work wherever any label in WORK_IMPLIED_BY is present, in the order
+#     of LLM_ACTIVITY_LABELS - and `work_from` says who put work there
+#     (llm: only the model, rule: only the rule, both);
+#   * a slim column set from step 04, below; the file also carries step 04's
+#     `building_pois` layer unchanged, so it is the one input for the steps
+#     after it.
+# Every building in step 04 must be in the plan and every call must have a
+# valid answer; the notebook stops with the ids to re-ask otherwise.
+ASSEMBLY_BUILDING_COLS = {
+    "building_id":      "the key",
+    "alkis_id":         "the ALKIS key, NULL on OSM rows",
+    "source":           "alkis or osm: marks the estimated volumes",
+    "ags":              "administrative key for zone totals",
+    "function":         "the AdV code of the register class",
+    "label_en":         "the register class in English",
+    "name":             "the cadastre's label, OSM name on the gap rows",
+    "address":          "validation and mapping",
+    "city":             "validation and mapping",
+    "area_m2":          "footprint",
+    "height_top_max_m": "height",
+    "volume_3d_m3":     "the redistribution weight",
+    "activities":       "the rule-based MiD map from the register class: the baseline the answers are validated against",
+    "n_pois":           "QA: POIs on the building",
+    "n_sites":          "QA: sites the building stands in",
+}
+CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / "06_buildings_classified.gpkg"
