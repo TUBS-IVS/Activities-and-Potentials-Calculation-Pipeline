@@ -38,3 +38,6 @@ env/
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Local hand-off notes, not for the repo ────────────────────────────────────
+docs/05-handoff-to-windows.md
