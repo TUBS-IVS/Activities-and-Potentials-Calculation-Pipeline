@@ -1515,6 +1515,21 @@ OSM_TWIN_ACTIVITY_TAGS = frozenset({
 # townhall 37, school 34; only `mall` is a pure container.
 POI_CONTAINER_USES = frozenset({"mall"})
 
+# The split weight is a pseudo-volume, not an area: split_area_m2 x a height.
+# A pure area split hands the 16-storey Okerhochhaus (426 m2 of footprint,
+# 60 m) 5.9 % of the TU main block while the flat Altgebaeude wings take the
+# rest - the same max/parts blindness as height_top_max_m, mirrored. The
+# height per POI is a ladder: the OSM `height` tag where mapped (parsed, only
+# 1.6 % of polygon POIs but exactly the multi-height landmarks that need it),
+# else `building:levels` x this storey height (12.1 %), else the host
+# building's own mean height volume_3d_m3 / area_m2 - which is the SAME number
+# for every POI on that building, so a building with no tagged POI keeps the
+# pure area split, and nothing gets worse anywhere. Heights outside the sanity
+# band below fall through to the next rung (the region's tallest LoD2 part is
+# 317 m).
+POI_SPLIT_STOREY_HEIGHT_M = 3.0
+POI_SPLIT_HEIGHT_SANE_M = (2.0, 350.0)
+
 # The result of step 04. Three layers: `buildings` (one per kept building, with
 # n_pois / poi_main_use / poi_uses / poi_names / n_sites / site_uses /
 # site_names), `building_pois` (one per building-POI pair: how, parent context,
