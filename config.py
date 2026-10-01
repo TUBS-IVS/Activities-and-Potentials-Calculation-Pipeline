@@ -2270,8 +2270,8 @@ LLM_POI_QUALIFIER_KEYS = ("leisure", "sport", "man_made", "building", "social_fa
 LLM_POI_BUILDING_QUALIFIER_FOR = frozenset({"sport", "historic", "man_made", "religion", "club", "leisure",
                                             "landuse", "power", "military", "railway", "aeroway", "industrial"})
 # Only own pairs whose share_in_building is below this are asked (decided 2026-10-01):
-# with 1.0, the POIs that share their building. A pair with share 1 is the sole occupant
-# and inherits the building's labels in the assembly (notebook 07 section 6).
+# with 1.0, the POIs that share their building. A pair with share 1 is the sole occupant:
+# its building's labels already cover it, so it stays at building level.
 LLM_POI_ASK_SHARE_BELOW = 1.0
 # Own pairs that are NOT asked even so, as use key -> values (an empty tuple = every value
 # of that key). Empty by decision of 2026-09-30; candidates raised by the dry run, for the
