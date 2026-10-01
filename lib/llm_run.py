@@ -33,6 +33,11 @@ import sys
 import threading
 import time
 from collections import Counter
+
+try:
+    import fcntl                                            # Unix: one run per answers file (see run())
+except ImportError:                                         # Windows has no fcntl; the long runs are a Linux affair
+    fcntl = None
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -73,6 +78,10 @@ def load_answers(path, columns: list = ANSWER_COLUMNS) -> pd.DataFrame:
                 except json.JSONDecodeError:
                     torn += 1
     df = pd.DataFrame(rows)
+    if len(df) and columns[0] not in df.columns:            # read with the other step's column list: say so, loudly
+        other = [c for c in df.columns if c.endswith("_id")]
+        raise ValueError(f"{p.name} is keyed by {other or ['another column']}, not {columns[0]!r}: read it with "
+                         f"answer_columns({(other or ['<id>'])[0]!r}, <that step's output schema>)")
     for c in columns:
         if c not in df.columns:
             df[c] = pd.Series([None] * len(df), dtype="object")
@@ -212,6 +221,35 @@ class _Progress:
         return "\n".join(rows)
 
 
+def _ends_with_newline(path) -> bool:
+    """True for a missing or empty file, else whether its last byte is a newline."""
+    p = Path(path)
+    if not p.exists() or p.stat().st_size == 0:
+        return True
+    with open(p, "rb") as fb:
+        fb.seek(-1, os.SEEK_END)
+        return fb.read(1) == b"\n"
+
+
+def _lock(answers_file):
+    """Hold `<answers_file>.lock` for this process; raise if another run holds it.
+
+    Two runs on the same file would ask the same ids twice (each only knows what was on
+    disk when it started). The kernel releases the lock when the process ends, however it
+    ends, so a crash never leaves a stale lock; the empty .lock file itself stays behind.
+    Without fcntl (Windows) there is no lock."""
+    lock_path = Path(str(answers_file) + ".lock")
+    lock_file = open(lock_path, "w")
+    if fcntl is not None:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            lock_file.close()
+            raise RuntimeError(f"another run is already writing {Path(answers_file).name} (it holds "
+                               f"{lock_path.name}); not starting a second one - it would ask the same ids twice")
+    return lock_file
+
+
 def _write_status(path, progress: _Progress):
     if path is None:
         return
@@ -264,6 +302,7 @@ def run(ids, records: dict, answers_file, *, label: str = "run", workers: int = 
         return progress.as_dict()
 
     Path(answers_file).parent.mkdir(parents=True, exist_ok=True)
+    run_lock = _lock(answers_file)                          # noqa: F841 - held until run() returns, then released
     lock = threading.Lock()
     local = threading.local()
 
@@ -291,6 +330,11 @@ def run(ids, records: dict, answers_file, *, label: str = "run", workers: int = 
         _write_status(status_file, progress)
 
     with open(answers_file, "a", encoding="utf-8") as f:
+        if not _ends_with_newline(answers_file):            # a torn last line (power loss mid-write): close it off,
+            f.write("\n")                                   # so the next answer is not glued to it and lost with it
+            f.flush()
+            os.fsync(f.fileno())
+
         def record_answer(a):
             nonlocal next_block, bar_shown
             with lock:

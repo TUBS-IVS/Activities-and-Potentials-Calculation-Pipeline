@@ -113,7 +113,7 @@ Step 07 runs the same way, from `06_buildings_classified.gpkg` and
 ```bash
 # notebook 07 sections 1-4 once -> 07_llm_poi_input.parquet (7,864 records), then:
 python scripts/07_run_llm_pois.py --sample                 # the 26 sample POIs, to see it work
-nohup nice -n 10 python scripts/07_run_llm_pois.py > data/output/07_llm_poi_run.log 2>&1 &
+nohup nice -n 10 python scripts/07_run_llm_pois.py >> data/output/07_llm_poi_run.log 2>&1 &
 cat data/output/07_llm_poi_status.json                     # progress, rewritten every minute
 ```
 

@@ -18,7 +18,7 @@ prompt.
 
 Detached on the Linux machine, with the status blocks in a log file:
 
-    nohup nice -n 10 python scripts/07_run_llm_pois.py > data/output/07_llm_poi_run.log 2>&1 &
+    nohup nice -n 10 python scripts/07_run_llm_pois.py >> data/output/07_llm_poi_run.log 2>&1 &
     tail -f data/output/07_llm_poi_run.log              # watch
     cat  data/output/07_llm_poi_status.json             # the same facts as JSON
 
@@ -76,9 +76,12 @@ def main(argv=None):
         done = done_ids(load_answers(answers, answer_columns(ID_COL, LLM_POI_OUTPUT_SCHEMA)), sha, ID_COL)
         ids = [p for p in ids if p not in done][: args.limit]
 
-    summary = run(ids, records, answers, label=label, workers=args.workers, status_every_s=args.status_every,
-                  status_file=LLM_POI_STATUS_FILE, id_col=ID_COL,
-                  system_prompt=LLM_POI_SYSTEM_PROMPT, schema=LLM_POI_OUTPUT_SCHEMA)
+    try:
+        summary = run(ids, records, answers, label=label, workers=args.workers, status_every_s=args.status_every,
+                      status_file=LLM_POI_STATUS_FILE, id_col=ID_COL,
+                      system_prompt=LLM_POI_SYSTEM_PROMPT, schema=LLM_POI_OUTPUT_SCHEMA)
+    except RuntimeError as e:                                # no token, or another run holds the answers file
+        sys.exit(f"{label}: {e}")
     print(f"\n{label}: done {summary['done']:,}, ok {summary['ok']:,}, failed {summary['failed']:,} -> {answers}")
     return 0 if summary["failed"] == 0 else 1
 

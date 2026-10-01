@@ -110,6 +110,8 @@ def call_llm(user_text: str, system_prompt: str = LLM_SYSTEM_PROMPT, *,
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):                  # a bare value on a line is not an event
+                continue
             kind = event.get("type")
             if kind == "chunk":
                 parts.append(event.get("content", ""))
