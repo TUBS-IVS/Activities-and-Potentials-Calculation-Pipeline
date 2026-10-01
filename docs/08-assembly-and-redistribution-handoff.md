@@ -60,8 +60,8 @@ see the same evidence again, its earlier answer is reused instead of asking.
 | site rows (`how = 'site'`) | 18,652 | none: the site's purpose is in the building's labels; `share_of_site` is an audit column | — |
 
 Two multi-occupant buildings have no asked POI at all, because all their
-pairs are landuse or vacant (`DENIAL0300008jmn`, `DENIAL0600001zkC`). They are
-treated like buildings without own POIs.
+pairs are landuse or vacant (`DENIAL0300008jmn`, `DENIAL0600001zkC`). Their
+categories get the fallback weight of section 5.2.
 
 ## 3. What comes from the server
 
@@ -215,13 +215,19 @@ share feeds its retail category.
 
 | unit | count | share `s` | categories |
 |---|---|---|---|
-| asked POI in a shared building | 7,864 | `share_in_building`, renormalised over the asked POIs of its building (question 3) | the POI's own (question 2) |
+| asked POI in a shared building | 7,864 | `share_in_building`, used as step 04.5 computed it | the POI's own (question 2) |
 | sole occupant | 14,542 | 1 | the building's |
-| building without own POIs, and the two buildings with no asked POI | 22,329 + 2 | 1 | the building's |
+| building without own POIs | 22,329 | 1 | the building's |
+| landuse area or vacant unit | 227 pairs | not a unit: its share carries no activity (1.33 M and 0.16 M m³, 0.5 % of all volume) | — |
+
+The shares are final: step 04.5 split each building among its own POIs by
+pseudo-volume (`split_area_m2` × `split_h_m`), and `share_in_building` sums to
+1 per building. Step 08 uses it as it is and recomputes nothing.
 
 - **Workers**, per building: `volume_3d_m3 × factor(bosserhof_class)`,
-  uncapped in run 1 (step-07 hand-off §7). Split to the building's POIs by
-  `s`, because every occupant carries `work`.
+  uncapped in run 1 (step-07 hand-off §7). Each POI's part is the building's
+  Workers value times its `share_in_building`, because every occupant carries
+  `work`. The share of a landuse area or vacant unit stays with the building.
 - **Any other category `c`**, per unit:
   `w(unit, c) = volume_3d_m3 × s × [c in categories(unit)] × 1/k`. Here `k` is
   the unit's number of non-worker categories after the collapse, or 1 if each
@@ -229,7 +235,8 @@ share feeds its retail category.
   has one category, Leisure, so `k = 1`.
 - **A category the building carries but none of its asked POIs does:** the
   previous even split, the volume divided by the building's number of
-  non-worker categories. It is never zero (§7).
+  non-worker categories. It is never zero (§7). This also covers the two
+  buildings with no asked POI.
 - **Bosserhof factor:** the 06 class names have capitals and punctuation, for
   example `retail (small-scale)` and `Industrial operations / Production`.
   Lower-case them, replace every non-letter with a space and collapse the
@@ -262,9 +269,11 @@ zone total against the assigned sum, per category. Add
 |---|---|---|---|
 | 1 | A unit with several non-worker categories | **even split `1/k`**: the previous pipeline's rule and the fallback's, so a unit's non-worker weight sums to its volume (recommended). Or the **full share to each**, as the step-07 hand-off §7 says | 7 of the first 301 answered POIs |
 | 2 | A POI category its building does not carry | **drop it**: the building is the authority (§7). Or **keep it** for that POI's share: the occupant-level answer saw the occupant, the building's call saw everything at once | 24 of 301 (8 %) |
-| 3 | The shares of the 227 excluded pairs | **renormalise** over the asked POIs, as notebook 07 says. Or leave the vacant units' share empty, as unused space | landuse 183 pairs, 1.33 M m³; vacant 44 pairs, 0.16 M m³ |
-| 4 | Workers caps | none in run 1 (§7), or the old 75th/95th percentile caps | — |
-| 5 | File names of 07.6 and 08 | the proposals above | — |
+| 3 | Workers caps | none in run 1 (§7), or the old 75th/95th percentile caps | — |
+| 4 | File names of 07.6 and 08 | the proposals above | — |
+
+Decided by the user on 2026-10-01: the shares are `share_in_building` as step
+04.5 computed them, with no renormalisation.
 
 For scale: all buildings hold 277.2 M m³, and the 2,915 multi-occupant
 buildings, the only ones where POI labels change anything, hold 64.6 M m³
@@ -273,11 +282,13 @@ buildings, the only ones where POI labels change anything, hold 64.6 M m³
 ## 7. Checks to keep as assertions
 
 - every asked `poi_id` has a valid answer under `257a72e709cb`;
-- shares sum to 1 per building (0 buildings off by more than 1e-6 today), and
-  the renormalised shares sum to 1 over the asked POIs;
+- `share_in_building` sums to 1 per building over its own pairs (0 buildings
+  off by more than 1e-6 today) and is used unchanged;
 - every building has a Bosserhof factor, and a zone or a logged reason for
   having none;
 - every category a building carries gets a weight above zero in at least one
   of its units;
 - per zone and category, the assigned sum equals the zone total;
-- per building, the sum over its POIs equals the building's value.
+- per building and category, the building's value equals the sum over its
+  POIs plus any fallback part; for Workers, its POIs together get the
+  building's value times the sum of their shares.

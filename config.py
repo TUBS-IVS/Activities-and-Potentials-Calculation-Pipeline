@@ -2278,8 +2278,8 @@ LLM_POI_ASK_SHARE_BELOW = 1.0
 # user to decide: {"landuse": ()} - 183 zoning polygons placed as occupants among the asked
 # pairs, 127 of them holding over half of their building's share; {"shop": ("vacant",),
 # "office": ("vacant",)} - 44 vacant units that serve no purpose. An excluded pair is left
-# out of the input file and of the answers; step 08 has to renormalise the shares over the
-# pairs that were asked.
+# out of the input file and of the answers; step 08 uses share_in_building as step 04.5
+# computed it (decided 2026-10-01), so an excluded pair's share carries no activity.
 LLM_POI_NOT_ASKED = {                    # decided 2026-10-01
     "landuse": (),                        # zoning areas placed as occupants: the ground, not a business
     "shop": ("vacant",), "office": ("vacant",),   # vacant units: no activity to label
