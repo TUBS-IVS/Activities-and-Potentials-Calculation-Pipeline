@@ -19,7 +19,9 @@ Progress, for a machine that runs for days:
     mix so far, the last building.
 
 Notebook 05 uses the same `run` for the ten-building sample; scripts/05_run_llm.py
-uses it for everything else.
+uses it for everything else. Step 07 (one POI per call) uses the same module with
+`id_col="poi_id"`, the POI prompt and the POI schema: its answers file is keyed by
+poi_id and carries that schema's fields, without the Bosserhof class.
 """
 from __future__ import annotations
 
@@ -37,18 +39,27 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from config import LLM_MODEL, LLM_MAX_WORKERS, LLM_STATUS_EVERY_S, LLM_STATUS_FILE, WORK_IMPLIED_BY
+from config import (
+    LLM_MODEL, LLM_MAX_WORKERS, LLM_STATUS_EVERY_S, LLM_STATUS_FILE, WORK_IMPLIED_BY,
+    LLM_SYSTEM_PROMPT, LLM_OUTPUT_SCHEMA,
+)
 from lib.llm_client import classify, prompt_sha, read_token
 
-ANSWER_COLUMNS = [
-    "building_id", "ok", "interpreted_type", "mid_labels", "bosserhof_class", "confidence", "reason",
-    "attempts", "error", "error_kind", "retry_errors", "raw_on_fail", "elapsed_s", "model", "prompt_sha", "ts",
-]
+# the run's own bookkeeping, written after the answer fields
+ANSWER_META_COLUMNS = ["attempts", "error", "error_kind", "retry_errors", "raw_on_fail", "elapsed_s", "model", "prompt_sha", "ts"]
+
+
+def answer_columns(id_col: str = "building_id", schema: dict = LLM_OUTPUT_SCHEMA) -> list:
+    """The columns of an answers file: the id, ok, the schema's fields in its order, the bookkeeping."""
+    return [id_col, "ok", *schema["properties"], *ANSWER_META_COLUMNS]
+
+
+ANSWER_COLUMNS = answer_columns()          # step 05: keyed by building_id, with the Bosserhof class
 
 
 # ------------------------------------------------------------------ the answers file
-def load_answers(path) -> pd.DataFrame:
-    """Every line of the answers file as a row; a torn last line (crash mid-write) is skipped."""
+def load_answers(path, columns: list = ANSWER_COLUMNS) -> pd.DataFrame:
+    """Every line of the answers file as a row with the given columns; a torn last line (crash mid-write) is skipped."""
     rows, torn = [], 0
     p = Path(path)
     if p.exists():
@@ -62,25 +73,25 @@ def load_answers(path) -> pd.DataFrame:
                 except json.JSONDecodeError:
                     torn += 1
     df = pd.DataFrame(rows)
-    for c in ANSWER_COLUMNS:
+    for c in columns:
         if c not in df.columns:
             df[c] = pd.Series([None] * len(df), dtype="object")
-    df = df[ANSWER_COLUMNS]
+    df = df[columns]
     if torn:
         print(f"  !!  {torn} unreadable line(s) in {p.name} skipped (a write cut short)")
     return df
 
 
-def valid_answers(answers: pd.DataFrame, sha: str) -> pd.DataFrame:
-    """The valid answers under the prompt `sha`, one per building (the latest wins)."""
+def valid_answers(answers: pd.DataFrame, sha: str, id_col: str = "building_id") -> pd.DataFrame:
+    """The valid answers under the prompt `sha`, one per id (the latest wins)."""
     if answers.empty:
         return answers
     ok = answers[(answers["ok"] == True) & (answers["prompt_sha"] == sha)]          # noqa: E712 - object column
-    return ok.sort_values("ts").drop_duplicates("building_id", keep="last")
+    return ok.sort_values("ts").drop_duplicates(id_col, keep="last")
 
 
-def done_ids(answers: pd.DataFrame, sha: str) -> set:
-    return set(valid_answers(answers, sha)["building_id"])
+def done_ids(answers: pd.DataFrame, sha: str, id_col: str = "building_id") -> set:
+    return set(valid_answers(answers, sha, id_col)[id_col])
 
 
 # ------------------------------------------------------------------ progress
@@ -93,13 +104,14 @@ def _hms(seconds) -> str:
 
 
 class _Progress:
-    def __init__(self, total: int, label: str):
+    def __init__(self, total: int, label: str, id_col: str = "building_id", class_col: str | None = "bosserhof_class"):
         self.t0 = time.time()
         self.total, self.label = total, label
+        self.id_col, self.class_col = id_col, class_col          # class_col None: no class in the answer (step 07)
         self.n = self.ok = self.fail = self.retried = 0
         self.busy_s = 0.0
         self.conf, self.classes, self.labels = Counter(), Counter(), Counter()
-        self.work_only = 0
+        self.work_only = self.multi = 0
         self.last = None
 
     def add(self, a: dict):
@@ -108,10 +120,13 @@ class _Progress:
         if a["ok"]:
             self.ok += 1
             self.conf[a["confidence"]] += 1
-            self.classes[a["bosserhof_class"]] += 1
+            if self.class_col:
+                self.classes[a[self.class_col]] += 1
             self.labels.update(a["mid_labels"])
             if a["mid_labels"] == ["work"]:
                 self.work_only += 1
+            if len(a["mid_labels"]) >= 2:
+                self.multi += 1
         else:
             self.fail += 1
         if a["attempts"] > 1:
@@ -134,8 +149,9 @@ class _Progress:
             "confidence": dict(self.conf), "top_classes": self.classes.most_common(6),
             "top_labels": self.labels.most_common(6), "work_only": self.work_only,
             "last": None if self.last is None else {
-                k: self.last.get(k) for k in ("building_id", "ok", "interpreted_type", "mid_labels",
-                                              "bosserhof_class", "confidence", "elapsed_s", "attempts", "error")},
+                k: self.last.get(k) for k in (self.id_col, "ok", "interpreted_type", "mid_labels",
+                                              *((self.class_col,) if self.class_col else ()),
+                                              "confidence", "elapsed_s", "attempts", "error")},
         }
 
     def _eta_text(self, d: dict) -> str:
@@ -150,8 +166,9 @@ class _Progress:
         if a is None:
             return ""
         if a["ok"]:
-            return f"{a['building_id']} → {', '.join(a['mid_labels'])} | {a['bosserhof_class']} ({a['confidence']})"[:width]
-        return f"{a['building_id']} FAILED: {a['error']}"[:width]
+            cls = f" | {a[self.class_col]}" if self.class_col else ""
+            return f"{a[self.id_col]} → {', '.join(a['mid_labels'])}{cls} ({a['confidence']})"[:width]
+        return f"{a[self.id_col]} FAILED: {a['error']}"[:width]
 
     # -- one redrawn line, for a terminal ---------------------------------------------
     def bar(self, width: int | None = None) -> str:
@@ -178,17 +195,20 @@ class _Progress:
             f"{d['time'][11:]} {self.label} | {d['done']:,}/{d['total']:,} {pct:.1f}% | ok {self.ok:,} · failed {self.fail:,} · "
             f"retried {self.retried:,} | {d['s_per_call']} s/call · {d['calls_per_min']}/min | elapsed {_hms(d['elapsed_s'])} · "
             f"{self._eta_text(d)}",
-            f"         confidence {mix(self.conf, 3, ('high', 'medium', 'low'))} | classes {mix(self.classes, 4)}",
-            f"         labels {mix(self.labels, 5)} | work as the only label "
-            + (f"{100 * self.work_only / self.ok:.0f}%" if self.ok else "-"),
+            f"         confidence {mix(self.conf, 3, ('high', 'medium', 'low'))} | "
+            + (f"classes {mix(self.classes, 4)}" if self.class_col else f"labels {mix(self.labels, 6)}"),
+            (f"         labels {mix(self.labels, 5)} | " if self.class_col else "         ")
+            + "work as the only label " + (f"{100 * self.work_only / self.ok:.0f}%" if self.ok else "-")
+            + ("" if self.class_col else " | two or more labels " + (f"{100 * self.multi / self.ok:.0f}%" if self.ok else "-")),
         ]
         if self.last is not None:
             a = self.last
             if a["ok"]:
-                rows.append(f"         last {a['building_id']} {a['elapsed_s']}s: \"{a['interpreted_type'][:70]}\" → "
-                            f"{', '.join(a['mid_labels'])} | {a['bosserhof_class']} ({a['confidence']})")
+                cls = f" | {a[self.class_col]}" if self.class_col else ""
+                rows.append(f"         last {a[self.id_col]} {a['elapsed_s']}s: \"{a['interpreted_type'][:70]}\" → "
+                            f"{', '.join(a['mid_labels'])}{cls} ({a['confidence']})")
             else:
-                rows.append(f"         last {a['building_id']} FAILED after {a['attempts']} attempts: {a['error'][:120]}")
+                rows.append(f"         last {a[self.id_col]} FAILED after {a['attempts']} attempts: {a['error'][:120]}")
         return "\n".join(rows)
 
 
@@ -203,34 +223,42 @@ def _write_status(path, progress: _Progress):
 
 
 # ------------------------------------------------------------------ the run
-def run(building_ids, records: dict, answers_file, *, label: str = "run", workers: int = LLM_MAX_WORKERS,
+def run(ids, records: dict, answers_file, *, label: str = "run", workers: int = LLM_MAX_WORKERS,
         status_every_s: float = LLM_STATUS_EVERY_S, status_file=LLM_STATUS_FILE, out=print,
-        live_bar: bool | None = None) -> dict:
-    """Classify every building in `building_ids` that has no valid answer yet, once.
+        live_bar: bool | None = None, id_col: str = "building_id",
+        system_prompt: str = LLM_SYSTEM_PROMPT, schema: dict = LLM_OUTPUT_SCHEMA) -> dict:
+    """Classify every id in `ids` that has no valid answer yet, once.
 
-    records: building_id -> record text. Appends to answers_file as it goes. `live_bar`
+    records: id -> record text. Appends to answers_file as it goes. `live_bar`
     (default: only when stdout is a terminal) redraws one progress line after every call;
     the status block is printed every status_every_s seconds in any case. Returns the final
-    status dict; a KeyboardInterrupt stops cleanly and returns what was done."""
-    ids = [str(b) for b in building_ids]
+    status dict; a KeyboardInterrupt stops cleanly and returns what was done.
+
+    `id_col` names the key column of the answers file (building_id in step 05, poi_id in
+    step 07); `system_prompt` and `schema` are what every call is sent and validated
+    against, and the hash of that prompt tags every line, so a resumed run never mixes
+    answers given under another prompt."""
+    ids = [str(b) for b in ids]
     if len(set(ids)) != len(ids):
-        raise ValueError("a building appears twice in the list to classify")
-    sha = prompt_sha()
-    prior = load_answers(answers_file)
-    done = done_ids(prior, sha)
+        raise ValueError("an id appears twice in the list to classify")
+    sha = prompt_sha(system_prompt)
+    columns = answer_columns(id_col, schema)
+    prior = load_answers(answers_file, columns)
+    done = done_ids(prior, sha, id_col)
     stale = int(((prior["ok"] == True) & (prior["prompt_sha"] != sha)).sum()) if len(prior) else 0   # noqa: E712
     pending = [b for b in ids if b not in done]
     missing = [b for b in pending if b not in records]
     if missing:
-        raise KeyError(f"{len(missing)} building(s) to classify have no record, e.g. {missing[:3]}")
+        raise KeyError(f"{len(missing)} id(s) to classify have no record, e.g. {missing[:3]}")
     read_token()                                            # fail now, not after the first pause
     if live_bar is None:
         live_bar = out is print and sys.stdout.isatty()
-    out(f"{label}: {len(ids):,} buildings, {len(done):,} already answered under prompt {sha}, {len(pending):,} to do"
+    noun = {"building_id": "buildings", "poi_id": "POIs"}.get(id_col, "records")
+    out(f"{label}: {len(ids):,} {noun}, {len(done):,} already answered under prompt {sha}, {len(pending):,} to do"
         + (f"; {stale:,} earlier answers under another prompt are ignored" if stale else "")
         + f" | model {LLM_MODEL}, {workers} request(s) at a time -> {Path(answers_file).name}")
     sys.stdout.flush()
-    progress = _Progress(len(pending), label)
+    progress = _Progress(len(pending), label, id_col, "bosserhof_class" if "bosserhof_class" in schema["properties"] else None)
     if not pending:
         _write_status(status_file, progress)
         return progress.as_dict()
@@ -245,8 +273,8 @@ def run(building_ids, records: dict, answers_file, *, label: str = "run", worker
         return local.s
 
     def one(b):
-        a = classify(records[b], session=_session())
-        a.update({"building_id": b, "model": LLM_MODEL, "prompt_sha": sha,
+        a = classify(records[b], system_prompt=system_prompt, schema=schema, session=_session())
+        a.update({id_col: b, "model": LLM_MODEL, "prompt_sha": sha,
                   "ts": dt.datetime.now().isoformat(timespec="seconds")})
         return a
 
@@ -266,7 +294,7 @@ def run(building_ids, records: dict, answers_file, *, label: str = "run", worker
         def record_answer(a):
             nonlocal next_block, bar_shown
             with lock:
-                f.write(json.dumps({k: a.get(k) for k in ANSWER_COLUMNS}, ensure_ascii=False) + "\n")
+                f.write(json.dumps({k: a.get(k) for k in columns}, ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
                 progress.add(a)

@@ -2188,3 +2188,390 @@ LLM_SAMPLE_BUILDING_IDS = (
     "DENIAL0600001xHZ",   # church
     "DENIAL060000cAhb",   # Marktkauf with kiosk and bakery
 )
+
+# ──────────────────────────────────────────────
+# STEP 06 — assembly: the LLM answers on the building polygons
+# ──────────────────────────────────────────────
+# Reads the step 04 buildings, the step 05 plan and the answers of the full run
+# (valid under the current prompt only) and gives every polygon its classes.
+# No model call is made. Decided with the user 2026-09-23:
+#   * signatures: every class_only building gets the answer of its
+#     signature's representative; `answer_copied` marks the 4,793 buildings
+#     whose answer was given for another building's record;
+#   * the work rule is applied here: `llm_labels` keeps the model's labels as
+#     it gave them, `mid_labels` is what later steps use - the model's labels
+#     plus work wherever any label in WORK_IMPLIED_BY is present, in the order
+#     of LLM_ACTIVITY_LABELS - and `work_from` says who put work there
+#     (llm: only the model, rule: only the rule, both);
+#   * a slim column set from step 04, below; the file also carries step 04's
+#     `building_pois` layer unchanged, so it is the one input for the steps
+#     after it.
+# Every building in step 04 must be in the plan and every call must have a
+# valid answer; the notebook stops with the ids to re-ask otherwise.
+ASSEMBLY_BUILDING_COLS = {
+    "building_id":      "the key",
+    "alkis_id":         "the ALKIS key, NULL on OSM rows",
+    "source":           "alkis or osm: marks the estimated volumes",
+    "ags":              "administrative key for zone totals",
+    "function":         "the AdV code of the register class",
+    "label_en":         "the register class in English",
+    "name":             "the cadastre's label, OSM name on the gap rows",
+    "address":          "validation and mapping",
+    "city":             "validation and mapping",
+    "area_m2":          "footprint",
+    "height_top_max_m": "height",
+    "volume_3d_m3":     "the redistribution weight",
+    "activities":       "the rule-based MiD map from the register class: the baseline the answers are validated against",
+    "n_pois":           "QA: POIs on the building",
+    "n_sites":          "QA: sites the building stands in",
+}
+CLASSIFIED_BUILDINGS_FILE = OUTPUT_DIR / "06_buildings_classified.gpkg"
+
+# ──────────────────────────────────────────────
+# STEP 07 — POI classification: the activities of every occupant
+# ──────────────────────────────────────────────
+# Step 05 labelled the building; step 07 asks the same question of the POIs placed
+# in a building - the own pairs of building_pois (how = inside, snap, unit; the site
+# rows are not asked, a site's label is its buildings') - so that the redistribution
+# (step 08) can split a building's volume by share_in_building x label. Decided
+# 2026-09-30 (docs/07-poi-classification-handoff.md) and 2026-10-01 (the scope):
+#   * only the POIs that share their building are asked: the own pairs with
+#     share_in_building < 1 (8,091 on 2,915 buildings). A POI with share 1 is the
+#     building's only occupant, its record went into the building's call and the
+#     building's labels are its labels; a building without own POIs keeps the
+#     building's labels too. No dedupe: every asked POI is answered in its own
+#     building's context, and the input file is the plan - every poi_id in it is asked;
+#   * the twelve labels of LLM_ACTIVITY_LABELS with the definitions of
+#     LLM_SYSTEM_PROMPT, verbatim - notebook 07 asserts the two prompts share the
+#     LABEL DEFINITIONS block; work by rule afterwards (lib/llm_run.apply_work_rule);
+#     no Bosserhof class - a building property, already on the buildings layer;
+#   * the same model, endpoint, client and resumable run as step 05, keyed by poi_id.
+LLM_POI_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {k: v for k, v in LLM_OUTPUT_SCHEMA["properties"].items() if k != "bosserhof_class"},
+    "required": [k for k in LLM_OUTPUT_SCHEMA["required"] if k != "bosserhof_class"],
+    "additionalProperties": False,
+}
+# From the step 01 POI layer, notebook 07 joins onto every pair the OSM key of the use
+# (`poi_use_tag`; without it a tag is written as the bare value) and, out of the folded
+# `tags` JSON, the keys below: an unnamed occupant is shown with its brand, else its
+# operator, because a name is where the model's world knowledge works.
+LLM_POI_NAME_FALLBACK_TAGS = ("brand", "operator")
+# Tags that qualify the occupant's use, written after it inside the bracket
+# ("sport=multi, leisure=sports_centre, building=sports_hall"; "amenity=social_facility,
+# social_facility=group_home, social_facility:for=child;juvenile"). Read from the step 01
+# layer's columns where the key is one, else from the folded `tags`. The stand-in dry run
+# of 2026-09-30 found the use alone hides the kind of place: 433 of the 548 sport=* POIs
+# carry leisure=*, 326 of the 374 social facilities say which kind they are.
+LLM_POI_QUALIFIER_KEYS = ("leisure", "sport", "man_made", "building", "social_facility", "social_facility:for",
+                          "community_centre", "community_centre:for")
+# `building` is shown as a qualifier only for these use keys - for amenity, shop, office ...
+# the POI's own building=* tag says nothing the use does not.
+LLM_POI_BUILDING_QUALIFIER_FOR = frozenset({"sport", "historic", "man_made", "religion", "club", "leisure",
+                                            "landuse", "power", "military", "railway", "aeroway", "industrial"})
+# Only own pairs whose share_in_building is below this are asked (decided 2026-10-01):
+# with 1.0, the POIs that share their building. A pair with share 1 is the sole occupant
+# and inherits the building's labels in the assembly (notebook 07 section 6).
+LLM_POI_ASK_SHARE_BELOW = 1.0
+# Own pairs that are NOT asked even so, as use key -> values (an empty tuple = every value
+# of that key). Empty by decision of 2026-09-30; candidates raised by the dry run, for the
+# user to decide: {"landuse": ()} - 183 zoning polygons placed as occupants among the asked
+# pairs, 127 of them holding over half of their building's share; {"shop": ("vacant",),
+# "office": ("vacant",)} - 44 vacant units that serve no purpose. An excluded pair is left
+# out of the input file and of the answers; step 08 has to renormalise the shares over the
+# pairs that were asked.
+LLM_POI_NOT_ASKED = {                    # decided 2026-10-01
+    "landuse": (),                        # zoning areas placed as occupants: the ground, not a business
+    "shop": ("vacant",), "office": ("vacant",),   # vacant units: no activity to label
+}
+LLM_POI_INPUT_FILE = OUTPUT_DIR / "07_llm_poi_input.parquet"         # the records; also the plan
+LLM_POI_ANSWERS_FILE = OUTPUT_DIR / "07_llm_poi_answers.jsonl"
+LLM_POI_SAMPLE_ANSWERS_FILE = OUTPUT_DIR / "07_llm_poi_sample_answers.jsonl"
+LLM_POI_STATUS_FILE = OUTPUT_DIR / "07_llm_poi_status.json"
+LLM_POI_RECORD_SAMPLE_PER_KIND = 3        # records printed per kind (how x evidence) in the notebook
+# The sample POIs: run once on the real model before anything larger (notebook 07 section 5,
+# scripts/07_run_llm_pois.py --sample). Chosen to cover the record kinds; filled from the
+# record review of notebook 07 section 2.
+LLM_POI_SAMPLE_IDS = (                   # all with share_in_building < 1, i.e. with other occupants beside them
+    "node/1332089918",   # Fielmann (shop=optician) inside a cinema building with five other occupants   named chain, multi-category building
+    "node/11395213406",  # Action (shop=variety_store) next to TEDi                                       named chain
+    "node/2240988237",   # unnamed post office, brand DHL, a quarter of its building                       brand as name
+    "way/166887097",     # unnamed shop=yes, brand Tamoil, half of its building                            key=yes, brand as name
+    "way/44098490",      # unnamed religion=christian, operator a parish, in the Kreuzkirche                operator, church outline
+    "way/106298713",     # unnamed man_made=works, an area snapped 3 m onto a metal works                    generic tag, snapped area
+    "node/4807345330",   # unnamed office=company, a unit inside the Hapimag resort (hotel)                 generic tag, unit in a hotel
+    "node/13282599023",  # a faculty secretariat (office=yes), a unit inside the faculty building           key=yes, institution rule
+    "node/317130576",    # unnamed sport=gymnastics inside a Turnhalle (footprint line)                     unnamed specific, outline parent
+    "way/99379655",      # unnamed leisure=sports_centre snapped 25 m onto a kindergarten                   unnamed specific, snapped area
+    "node/2931347280",   # Eckert & Ziegler Nuclitec (man_made=works), snapped 10 m, industrial site        named company, workplace only
+    "way/763442432",     # an eye doctor's practice (amenity=doctors), an area snapped 37 m                  the far snap
+    "node/7798478715",   # Tete a Tee (shop=tea), a unit inside City-Galerie Wolfsburg                       unit in a mall
+    "node/3358622020",   # Rewe (shop=supermarket), a unit inside the Forum mall                             unit in a mall
+    "node/3931912503",   # Rossmann (shop=chemist), a unit inside a REWE                                     chain unit in a supermarket
+    "node/894579605",    # Double You (amenity=restaurant) in the Angercenter (footprint line)               outline parent
+    "node/4168516251",   # a historic fountain (historic=yes, man_made=water_well) snapped 12 m             snap point, not building-bound by nature
+    "node/1608226158",   # Jana's Schuh- und Schlüsseldienst (craft=locksmith;shoemaker) in a centre        multi-value tag, unit
+    "way/1144215960",    # unnamed kindergarten, an area snapped onto an OSM gap building                    no cadastre line, footprint line
+    "node/2168543995",   # Bücherei Calberlah (amenity=library) in a Realschule                               institution rule?
+    "node/8764916644",   # Stadtteilbibliothek Westhagen (amenity=library) in a Schulzentrum                  institution rule, site
+    "node/7279307085",   # Lichtblick (amenity=social_facility) in an office building                       social facility with qualifiers
+    "node/329451020",    # unnamed amenity=place_of_worship, a unit inside St. Bernward                      unnamed, unit in a church
+    "way/729700428",     # Cecil (shop=clothes), a unit inside Schloss-Arkaden - the longest record         mall unit, ~3,000 chars
+    "way/8044561",       # MARKTKAUF (shop=supermarket) with five units inside it                            the parent of units
+    "node/60149547",     # Helbing (shop=bakery), a unit inside that MARKTKAUF                               unit in a supermarket
+)
+# The POI prompt: LLM_SYSTEM_PROMPT rewritten for one occupant. The ALLOWED ACTIVITY
+# LABELS list and the LABEL DEFINITIONS block are the building prompt's, byte for byte
+# (asserted in notebook 07); Part B and the Bosserhof output are gone; the record lines,
+# the procedure and the confidence tiers describe one occupant. Reviewed and confirmed
+# by the user before any call; its hash tags every answer, so it is not edited once the
+# full run has started.
+LLM_POI_SYSTEM_PROMPT = """\
+You are an activity interpreter for the occupants of buildings.
+
+You receive ONE occupant of a building per message as a short labelled
+record: a point or an area that OpenStreetMap mappers mapped in, or just
+beside, the building. Whatever it is, it is the thing to label. The record
+says what the occupant is and where it sits, then describes the building
+around it. Each line names its source; an absent line means that source has
+nothing to say. Read the lines with the weight given here:
+
+  occupant:      the thing to label: its name in quotes, if the mapper gave
+                 one, followed by its OpenStreetMap tag in brackets, written
+                 key=value. The word unnamed stands where the mapper gave no
+                 name; it is not a name. Where the mapper gave no name but a
+                 brand or an operator, it follows the word unnamed, marked as
+                 brand or operator: a brand is the chain the occupant belongs
+                 to and stands for its name; an operator is the body that
+                 runs the occupant and says what kind of body stands behind
+                 it, not that people come here for that body's other
+                 affairs. A tag written key=yes says only that the occupant
+                 is of that kind and nothing more; several values of one key
+                 are joined by ";" inside the bracket; further tags after a
+                 comma qualify the first. This line is the strongest evidence
+                 for what people come here for.
+  role:          where the occupant sits: "inside the building"; "the
+                 building itself" when the tag is the one on the building's
+                 own OpenStreetMap outline; "a unit inside" a larger occupant
+                 of the same building, given as its name and tag; or "placed
+                 on the nearest building" because the mapper put it outside
+                 every building outline - a point a few metres outside, or an
+                 area mapped around or next to the building - with the
+                 distance. The role locates the occupant. The parent of a
+                 unit is another occupant: its purposes are its own, and the
+                 unit shares them only under the institution rule below.
+  building also inside: the other businesses, institutions and facilities
+                 mapped in the same building, each written as on the
+                 occupant line. When several share one tag, the tag is given
+                 once with the count and the names after it, and that list
+                 runs to the next entry that has its own bracketed tag. They
+                 say what kind of place the building is, which matters when
+                 the occupant line is generic (procedure step 3) and for the
+                 institution rule. They are not the occupant: their purposes
+                 are theirs, not its. When this line is absent, the occupant
+                 is the only thing mapped in the building.
+  building footprint: the tag OpenStreetMap mappers gave the building's own
+                 outline and, introduced by "named", the name they gave it.
+                 Says what kind of building this is, as the cadastre does.
+  building site: the larger complex, campus or estate the building stands in,
+                 as name and tag. A site named after a company or an
+                 institution, or tagged as a facility, is that organisation's
+                 premises. A site whose name is only that of an area, a street
+                 or an estate, or that has no name, says what the ground is
+                 zoned for and nothing more.
+  building cadastre: the official class of the building from the German land
+                 register (ALKIS) and, introduced by "named", the register's
+                 own name for the building. Reliable about the kind of
+                 building. The register's name describes the building as the
+                 register saw it and may be older than the occupant; where it
+                 contradicts the occupant line, the occupant line wins.
+  building place: municipality, footprint area in square metres and height in
+                 metres. Size says how large the building is, never which
+                 activity the occupant serves.
+
+Names carry world knowledge: use what you know about the chain, institution,
+company or facility a name refers to, to understand the thing that carries
+the name - the occupant's name, brand or operator for the occupant; a
+parent's or a neighbour's name for what that neighbour is; a site's, the
+outline's or the register's name for what the building is. What you know
+about a neighbour or about the building never becomes a purpose of the
+occupant.
+
+The building lines say where the occupant is and what else is there. They
+never add a purpose of their own: the occupant is labelled for what people
+come to it for, not for what its neighbours or the building are for. The one
+exception is an occupant that is the institution the building or the site
+belongs to, or one of its parts - a division, a department, a hall or a
+service the institution itself runs, as opposed to a separate business or
+body that merely has its premises there. The building or the site belongs to
+an institution when the site line, the footprint line, the register's name,
+the parent on the role line or an occupant on the also-inside line is that
+institution. Such an occupant serves the institution's purpose, and that
+purpose is among its labels.
+
+work is the purpose of the people employed at the occupant. Give it where
+employment is what the place is for - people come to it in order to work
+there - and not to every occupant because it has staff.
+
+Your output is the set of activity labels (mid_labels): the purposes for
+which people come to this occupant.
+
+────────────────────────────────────
+ACTIVITY LABELS
+────────────────────────────────────
+
+ALLOWED ACTIVITY LABELS
+- work
+- university
+- school
+- childcare
+- retail_daily
+- retail_non_daily
+- leisure
+- sports
+- errands
+- meetup
+- lessons
+- business
+
+PROCEDURE:
+1) List every distinct purpose people come to this occupant for, from the
+   occupant line: its tag says what kind of place it is, its name, brand or
+   operator what you know about it. One occupant can serve one purpose or
+   several. The role says where it sits and adds a purpose only under the
+   institution rule; the other occupants and the building add none.
+2) Map each purpose to one or more labels using the definitions below and
+   return every label found. A label is added only when the purpose meets
+   that label's core idea; a purpose that only brushes a second label does
+   not receive it. Do not collapse several purposes into one and do not stop
+   at the first.
+3) If the occupant line says no more than that it is a company, an office, a
+   shop, a commercial or industrial building, an area zoned for industry,
+   commerce or retail, or a historic object - a generic tag or key=yes, and
+   no name, brand or operator you know - take the purposes such a place
+   serves by its nature. The building lines may say what kind of such place
+   it is, never what its neighbours are for. When the kind of place covers
+   several purposes, list a label for each of them rather than choosing one.
+   Every occupant receives at least one label.
+
+────────────────────────────────────
+LABEL DEFINITIONS
+────────────────────────────────────
+
+- work
+
+Represents employment: people come here because this is their regular place of work.
+Covers gainful work of every kind carried out in the building - production, crafts,
+office and administration, logistics, research, services, care, teaching, operations
+Describes the purpose of the people employed in the building, not the purpose of its visitors
+Distinct from "business", which is a visitor's professional errand at a place that is not their own workplace
+Core idea: "People come here because they are employed here."
+
+- university
+
+Represents tertiary/higher-level education activity.
+Covers structured learning, teaching, and research at the higher education level
+Involves academic instruction, research, and study environments
+Distinct from general learning by its institutional and advanced nature
+Core idea: “Advanced academic education and research happen here.”
+
+- school
+
+Represents formal compulsory or pre-tertiary education activity.
+Covers structured education for children and adolescents
+Includes general and vocational schooling
+Defined by curriculum-based learning under institutional supervision
+Core idea: “Children or teenagers receive structured education here.”
+
+- childcare
+
+Represents supervision and early development care for young children.
+Focuses on care, supervision, and early-stage development
+Not primarily academic or curriculum-driven (unlike school)
+Strong emphasis on custodial and developmental support
+Core idea: “Young children are cared for and supervised here.”
+
+- retail_daily
+
+Represents frequent, necessity-driven consumption activity.
+Covers acquisition of essential, regularly needed goods
+Characterized by high frequency and routine visits
+Typically tied to basic living needs
+Core idea: “People come here regularly to fulfill essential daily needs.”
+
+- retail_non_daily
+
+Represents infrequent, discretionary consumption activity.
+Covers acquisition of non-essential or durable goods
+Visits are planned, occasional, or need-based
+Often involves comparison, browsing, or larger purchases
+Core idea: “People come here occasionally to buy non-essential or long-term goods.”
+
+- leisure
+
+Represents hedonic, relaxation, or enjoyment-oriented activity.
+Focuses on free-time use driven by pleasure, comfort, or experience
+Includes passive or active enjoyment, but not primarily goal-oriented tasks
+Distinguished by non-obligatory participation. People choose to go here for enjoyment, not out of necessity or obligation.
+Core idea: “People come here to relax, enjoy, or spend free time.”
+
+- sports
+
+Represents physical activity, exercise, or bodily training.
+Focuses on intentional physical exertion or fitness improvement
+Can be recreational or structured, but always movement-centered
+Distinguished from leisure by physical intensity and purpose
+Core idea: “People come here to be physically active or train their body.”
+
+- errands
+
+Represents task-oriented, functional activities needed for daily life management.
+Covers practical obligations or maintenance tasks
+Typically short, goal-driven visits with a clear outcome
+Often involves services, administration, or personal maintenance
+Core idea: “People come here to complete necessary tasks or obligations.”
+
+- meetup
+
+Represents social interaction and gathering activity.
+Focuses on interpersonal connection and shared presence
+Can be informal or organized, but the primary purpose is social exchange
+Not necessarily tied to consumption or formal structure
+Core idea: “People come here to meet and interact with others.”
+
+- lessons
+
+Represents structured instruction or skill acquisition activity.
+Focuses on learning guided by an instructor
+Can occur at any level (formal or informal), but always organized and instructional
+Distinguished from general education by activity type (learning session), not institution
+Core idea: “People come here to learn something through instruction.”
+
+- business
+
+Represents professional or organizational interaction activity (non-routine workplace).
+Covers goal-oriented professional interactions, often external-facing
+Includes meetings, consulting, administrative dealings, or formal exchanges
+Distinct from "work" because it reflects the visitor’s purpose, not employment
+Core idea: “People come here for professional or organizational matters.”
+
+────────────────────────────────────
+OUTPUT FORMAT (STRICT JSON ONLY)
+────────────────────────────────────
+
+{
+  "interpreted_type": "<plain-English description of what this occupant most likely is>",
+  "mid_labels": ["<one or more activity labels from the allowed list>"],
+  "confidence": "<high | medium | low>",
+  "reason": "<max 80 words. Name the record lines and names you used and say why each label applies.>"
+}
+
+confidence:
+- high   → the occupant line alone - its tag, or its name, brand or operator
+           - tells you what it is and what people come to it for
+- medium → the occupant line does not: its tag is generic and no name, brand
+           or operator helps, but the building lines say what kind of place
+           it is, or the institution rule applies
+- low    → neither: the occupant line is generic and the building lines say
+           no more than that it is a building of some class and size
+"""

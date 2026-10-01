@@ -168,43 +168,58 @@ def _text(value, what: str) -> str:
 
 
 def validate_answer(obj: dict, schema: dict = LLM_OUTPUT_SCHEMA) -> dict:
-    """The answer with exactly the schema's fields, every string canonical. Raises InvalidAnswer."""
+    """The answer with exactly the schema's fields, every string canonical. Raises InvalidAnswer.
+
+    Driven by the schema, so one validator serves step 05 (with the Bosserhof class) and
+    step 07 (without it): a property with an enum is canonicalised against it, an array
+    property is a list of its items' enum (kept in the model's order, each once, never
+    empty when the schema asks for at least one), every other string property is trimmed.
+    The fields come back in the schema's order."""
     props = schema["properties"]
     missing = [k for k in schema["required"] if k not in obj]
     if missing:
         raise InvalidAnswer(f"missing field(s): {', '.join(missing)}")
-    labels = obj["mid_labels"]
-    if isinstance(labels, str):
-        labels = [labels]
-    if not isinstance(labels, list):
-        raise InvalidAnswer("mid_labels must be a list")
-    allowed_labels = props["mid_labels"]["items"]["enum"]
-    seen: list[str] = []
-    for lab in labels:
-        c = _canon(lab, allowed_labels, "activity label")
-        if c not in seen:
-            seen.append(c)
-    if not seen:
-        raise InvalidAnswer("mid_labels is empty; every building receives at least one label")
-    return {
-        "interpreted_type": _text(obj["interpreted_type"], "interpreted_type"),
-        "mid_labels": seen,
-        "bosserhof_class": _canon(obj["bosserhof_class"], props["bosserhof_class"]["enum"], "bosserhof_class"),
-        "confidence": _canon(obj["confidence"], props["confidence"]["enum"], "confidence"),
-        "reason": _text(obj["reason"], "reason"),
-    }
+    out: dict = {}
+    for key, spec in props.items():
+        if key not in obj:                                   # an optional field left out (none today)
+            continue
+        value = obj[key]
+        if spec.get("type") == "array":
+            if isinstance(value, str):
+                value = [value]
+            if not isinstance(value, list):
+                raise InvalidAnswer(f"{key} must be a list")
+            allowed = spec["items"]["enum"]
+            seen: list[str] = []
+            for item in value:
+                c = _canon(item, allowed, f"{key} entry")
+                if c not in seen:
+                    seen.append(c)
+            if not seen and spec.get("minItems", 0) >= 1:
+                raise InvalidAnswer(f"{key} is empty; at least one entry from the list is required")
+            out[key] = seen
+        elif "enum" in spec:
+            out[key] = _canon(value, spec["enum"], key)
+        else:
+            out[key] = _text(value, key)
+    return out
 
 
-# ------------------------------------------------------------------ one building
-_FAILED = {"interpreted_type": None, "mid_labels": [], "bosserhof_class": None, "confidence": None, "reason": None}
+# ------------------------------------------------------------------ one record
+def _failed_fields(schema: dict) -> dict:
+    """The answer fields of a failed call: an empty list for an array, None for the rest."""
+    return {k: [] if spec.get("type") == "array" else None for k, spec in schema["properties"].items()}
 
 
-def classify(record: str, *, system_prompt: str = LLM_SYSTEM_PROMPT,
+def classify(record: str, *, system_prompt: str = LLM_SYSTEM_PROMPT, schema: dict = LLM_OUTPUT_SCHEMA,
              max_attempts: int = LLM_MAX_ATTEMPTS, session=None, token: str | None = None,
              sleep=time.sleep) -> dict:
     """Ask, check, re-ask until the answer is valid or the attempts are spent. Never raises
-    for a per-building problem. Returns the answer fields plus attempts, error, error_kind,
-    retry_errors (what each failed attempt said), raw_on_fail, elapsed_s."""
+    for a per-record problem. Returns the answer fields plus attempts, error, error_kind,
+    retry_errors (what each failed attempt said), raw_on_fail, elapsed_s.
+
+    `system_prompt` and `schema` travel together: step 05 sends the building prompt and
+    validates against LLM_OUTPUT_SCHEMA, step 07 the POI prompt and LLM_POI_OUTPUT_SCHEMA."""
     t0 = time.perf_counter()
     retry_errors: list[str] = []
     raw_last = None
@@ -212,7 +227,7 @@ def classify(record: str, *, system_prompt: str = LLM_SYSTEM_PROMPT,
     for attempt in range(1, max_attempts + 1):
         try:
             raw_last = call_llm(user_text, system_prompt, session=session, token=token)
-            answer = validate_answer(parse_answer(raw_last))
+            answer = validate_answer(parse_answer(raw_last), schema)
             return {"ok": True, **answer, "attempts": attempt, "error": None, "error_kind": None,
                     "retry_errors": retry_errors, "raw_on_fail": None,
                     "elapsed_s": round(time.perf_counter() - t0, 2)}
@@ -227,6 +242,6 @@ def classify(record: str, *, system_prompt: str = LLM_SYSTEM_PROMPT,
             user_text = (f"{record}\n\nYour previous reply was rejected: {e}. "
                          "Reply with the JSON object only, using the exact strings from the lists.")
     last = retry_errors[-1] if retry_errors else "unknown"
-    return {"ok": False, **_FAILED, "attempts": max_attempts, "error": last,
+    return {"ok": False, **_failed_fields(schema), "attempts": max_attempts, "error": last,
             "error_kind": last.split(":", 1)[0], "retry_errors": retry_errors[:-1],
             "raw_on_fail": (raw_last or "")[:2000], "elapsed_s": round(time.perf_counter() - t0, 2)}
