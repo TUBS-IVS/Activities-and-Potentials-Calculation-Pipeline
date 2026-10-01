@@ -147,12 +147,13 @@ the copy is the record of what was asked. Section 5 needs the API token.
 3. **Print the label clash table:** per `poi_use`, the POI categories its
    building does not carry. Early result from the first 301 answers: 24 POIs
    (8 %), for example a shop answered `retail_daily` in a building labelled
-   `work` only. Which label counts is decided later on the laptop, so keep
-   both: the POI's in `poi_mid_labels`, the building's in the `buildings`
-   layer.
+   `work` only. Decided 2026-10-01: merge. The building's label set takes
+   its POIs' labels as well, each label once, and every POI keeps its own
+   labels.
 4. **Write `07_building_pois_classified.gpkg`** (name decided): layer
    `building_pois` with the 7,864 asked POIs and the columns above, and layer
-   `buildings` copied unchanged from step 06, so that step 08 reads one file.
+   `buildings` from step 06 with the merged labels, so that step 08 reads one
+   file.
 
 ## 5. What can be used for the redistribution
 
@@ -220,12 +221,25 @@ The previous pipeline's redistribution is in notebooks 10 and 11 and in
   `query_nearest` is its replacement. The allocation loops with `iterrows`
   over zones, categories and buildings, which is slow.
 
+### 5.3 The idea for step 08, as the user put it (2026-10-01)
+
+- The building's amount comes from its volume, Workers included.
+- Each POI in a shared building gets its part of that amount by its
+  `share_in_building`, so a smaller share gets a smaller part. With a bakery
+  at 0.3 and a pub at 0.7, the pub gets 70 % of the building's workers and
+  the bakery 30 %. The bakery's part goes to `retail_daily`, the pub's to
+  `leisure`.
+- Labels are merged: a building carries its own labels and those of its
+  POIs, each label once.
+
+The details are worked out on the laptop.
+
 ## 6. Facts for the later discussion
 
 Measured on the first 301 answers; recount them in 07.6 on the full set.
 
 - **Label clash:** 24 POIs (8 %) carry a category their building does not.
-  Which label counts is to be decided.
+  Decided: merge, each label once (section 5.3).
 - **Several categories on one POI:** 7 POIs have two or more non-worker
   categories, for example a community centre with leisure and childcare.
 - **Work-only occupants:** 28 POIs, mostly offices, have only `work` or
