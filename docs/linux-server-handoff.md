@@ -20,7 +20,9 @@ laptop and their inputs and outputs were moved out of this clone.
 
 The run of 2026-09-15/16 is under **prompt `795433ed9feb`** (the first twelve
 hex characters of the SHA-1 of `LLM_SYSTEM_PROMPT` in `config.py` at commit
-`95f5608`), model **`gpt-oss-120b`**. Every answer line carries that hash.
+`95f5608`), model requested **`gpt-oss-120b`** (which model answered is
+unconfirmed; see the comment above `LLM_MODEL` in `config.py`). Every answer
+line carries that hash.
 
 Notebook cells are named by content below, not by number: VS Code shows no
 cell numbers.
@@ -213,7 +215,8 @@ Before assembling, check on the laptop:
   once and were answered on a later pass — `valid_answers` ignores them.
   Only if the valid count is short, run `scripts/05_run_llm.py` on the server
   once more; it asks exactly the missing ones;
-- every line `prompt_sha == '795433ed9feb'` and `model == 'gpt-oss-120b'`;
+- every line `prompt_sha == '795433ed9feb'` and `model == 'gpt-oss-120b'`
+  (the requested name, stamped by the client, not reported by the server);
 - `config.py` on the laptop hashes `LLM_SYSTEM_PROMPT` to `795433ed9feb`
   (commit `95f5608` or a later one that did not touch the prompt). Safer:
   when writing 05.6, add `LLM_RUN_PROMPT_SHA = "795433ed9feb"` to `config.py`

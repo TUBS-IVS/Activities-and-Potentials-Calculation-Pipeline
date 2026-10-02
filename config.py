@@ -2136,6 +2136,17 @@ LLM_PLAN_FILE = OUTPUT_DIR / "05_llm_plan.parquet"
 # Every building is asked once. The token is read from the environment or
 # ROOT/.env (TU_KI_TOOLBOX_TOKEN=...) at call time, never at import, never
 # printed; .env is git-ignored.
+# LLM_MODEL is the name this code SENDS, not a confirmed model. The reply carries
+# the text only, and the `model` field of every answers line is this constant,
+# stamped by lib/llm_run.py. TU's model list names gpt-oss "openai/gpt-oss-120b",
+# and the KI-Toolbox changelog lists it as an On-Premise model (30 Sep 2025),
+# which TU's client libraries call at /api/v1/localChat/send. The bare
+# "gpt-oss-120b" sent to /chat/send is not on that list. Which model answered
+# steps 05 and 07 is therefore unconfirmed (checked 2026-10-01): write
+# "requested gpt-oss-120b", never "classified by gpt-oss-120b", until the
+# KI-Toolbox team confirms it. Do not change either line under existing answers:
+# a resumed run checks the prompt sha only, not the model, and would mix two
+# models in one answers file.
 LLM_API_URL = "https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send"
 LLM_MODEL = "gpt-oss-120b"
 LLM_TIMEOUT_S = 180

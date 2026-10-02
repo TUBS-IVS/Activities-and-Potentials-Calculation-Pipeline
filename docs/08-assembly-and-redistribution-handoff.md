@@ -1,7 +1,7 @@
 # Step 07 results for the laptop: what the server delivers and what it can be used for
 
-Hand-off from the Linux server (branch `linux`, 2026-10-01) to the laptop
-(branch `final-pipeline`). It says what was done on the server, what arrives
+Hand-off from the Linux server (branch `linux`, written 2026-10-01, updated
+2026-10-02 after the run finished) to the laptop (branch `final-pipeline`). It says what was done on the server, what arrives
 from it, how to read it, and which data and earlier work can feed the
 redistribution (step 08). **How** step 08 redistributes is not decided here:
 that is discussed and written on the laptop. Every number was measured on the
@@ -16,7 +16,7 @@ marked **unverified**.
 | 01–04 extraction, enrichment, POI split | laptop | done: `04_buildings_enriched.gpkg` |
 | 05 building classification, 34,993 calls | server | done 2026-09-23, prompt `795433ed9feb` |
 | 06 assembly of the building answers | laptop | done (`final-pipeline` 1cfdad0): `06_buildings_classified.gpkg` |
-| 07 POI classification, 7,864 calls | server | **running** since 2026-10-01 afternoon, about 5 s per call, ends around the morning of 2026-10-02 (`eta_at` in `07_llm_poi_status.json`); prompt `257a72e709cb` |
+| 07 POI classification, 7,864 calls | server | done 2026-10-02 00:53: 7,864 valid answers (325 on the first start, 7,539 on the full run), 0 failed, 1 retry; 7,645 high, 202 medium, 17 low confidence; prompt `257a72e709cb` |
 | 07.6 the answers onto the POIs | laptop | to write: notebook 07 section 6 (section 4 below) |
 | 08 redistribution | laptop | to discuss, then write |
 
@@ -36,13 +36,43 @@ What was done on the server for step 07 (branch `linux`, commits `e886b6f`,
 - **Prompt reviewed and confirmed by the user** before any call. Its label
   definitions are byte-identical to the building prompt (notebook 07 asserts
   it). No Bosserhof class per POI.
-- **Sample on the real model:** 26 of 26 valid, no retries, all high
+- **Sample on the KI-Toolbox:** 26 of 26 valid, no retries, all high
   confidence. An office gets `work` only, a shop gets retail, a library gets
   leisure.
 - **Run verified and hardened** before the full start (89 checks): a torn last
   line no longer swallows the next answer, a second instance refuses to start
   (`07_llm_poi_answers.jsonl.lock`), and reading an answers file with the
   other step's column list raises instead of returning rows without the id.
+
+### The model: requested, not confirmed
+
+Every call of steps 05 and 07 sent `"model": "gpt-oss-120b"` to
+`https://ki-toolbox.tu-braunschweig.de/api/v1/chat/send` (`config.LLM_MODEL`,
+`config.LLM_API_URL`). Nothing confirms that gpt-oss answered:
+
+- The reply carries only the text. The `model` field of every answers line is
+  that constant, stamped by `lib/llm_run.py`, not reported by the server.
+- TU's model list names gpt-oss `openai/gpt-oss-120b`, and the KI-Toolbox
+  changelog lists it as an On-Premise model (30 Sep 2025). TU's client
+  libraries call such models at `/api/v1/localChat/send`. The bare name sent
+  to `/chat/send` is not on the list. A test in another session reported that
+  a name not on the list is answered by a default model, without an error
+  (not reproduced here).
+- Step 05 ran 15–18 Sep 2026, before the toolbox added GPT 5.6-Terra,
+  GPT 5.6-Luna and GPT 6-Astra (23 Sep 2026). The last default model the
+  changelog names for the external chat is o4-mini (23 Apr 2025).
+- Step 07 writes differently from step 05: in "non-essential" step 05 used
+  the Unicode hyphen U+2010 instead of `-` in 143 of 982 uses, step 07 in 0
+  of 215; and step 07 took about 5 s per call instead of 8 s. The prompt changed as well, so this proves
+  nothing either way.
+
+In the write-up: "requested gpt-oss-120b via the TU KI-Toolbox; the model that
+answered is unconfirmed". Do not name gpt-oss, o4-mini or GPT 5.6 as the model
+until the KI-Toolbox team (gitz-ki-tools-feedback@tu-braunschweig.de) confirms
+it. Three calls with the same question would settle it: `gpt-oss-120b` on
+`/chat/send`, `openai/gpt-oss-120b` on `/localChat/send`, and a made-up name on
+`/chat/send`. Do not change `LLM_MODEL` or `LLM_API_URL` under existing
+answers: a resumed run checks the prompt sha only, not the model.
 
 ## 2. Labels: building level and POI level
 
@@ -72,20 +102,20 @@ Left out at POI level, because the building polygon already carries them:
 
 ### Data, once the run has finished
 
-The run has finished when its log ends with `full: done N, ok N, failed 0`
-and `pgrep -f 'python scripts/07_run_llm_pois.py'` prints nothing on the
-server. If failures remain, start the script again there. It asks only what
-has no valid answer yet.
+The run finished on 2026-10-02 at 00:53. Checked on the server: 7,864 lines,
+7,864 valid answers under `257a72e709cb`, every `poi_id` of the input parquet
+answered once, none missing, none extra. No run log was written (the run was
+not started with the `nohup` line); `07_llm_poi_status.json` holds its summary.
 
 ```
-scp mayur@<server>:~/Documents/Activities-and-Potentials-Calculation-Pipeline/data/output/07_llm_poi_{answers.jsonl,input.parquet,status.json,run.log} data\output\
+scp mayur@<server>:~/Documents/Activities-and-Potentials-Calculation-Pipeline/data/output/07_llm_poi_{answers.jsonl,input.parquet,status.json} data\output\
 ```
 
 | file | needed for |
 |---|---|
 | `07_llm_poi_answers.jsonl` | **required.** One JSON object per line, keyed by `poi_id`: `poi_id, ok, interpreted_type, mid_labels, confidence, reason, attempts, error, error_kind, retry_errors, raw_on_fail, elapsed_s, model, prompt_sha, ts`. About 5 MB |
 | `07_llm_poi_input.parquet` | **required** for the coverage check: the 7,864 asked POIs and the exact record each call sent (`poi_id, building_id, how, evidence, record, n_chars`) |
-| `07_llm_poi_status.json`, `07_llm_poi_run.log` | optional: pace, failures, label mix |
+| `07_llm_poi_status.json` | optional: pace, failures, label mix (of the full run's 7,539 calls) |
 | `07_llm_poi_answers.jsonl.lock` | do not copy: an empty lock file that belongs to the server |
 
 Compare checksums on both sides: `sha256sum <file>` on the server and
@@ -97,6 +127,7 @@ the files the step-07 records were built from:
 | `06_buildings_classified.gpkg` | `d5baa3f235d2cca8928773faf1d83d6e8abcfd933f3b270397cab92a2208c90b` |
 | `01_all_pois.gpkg` | `1e59d2bd360f76c2f1b616ef328ced1cab539032d6e5b657cfd63e47a0b5482a` |
 | `07_llm_poi_input.parquet` | `3b562af9bbea267743229f296374970bae3c4e75148be6fc8f7bc1487f9c8cc1` |
+| `07_llm_poi_answers.jsonl` (5,039,583 bytes, 7,864 lines) | `e7eb26adaff707d63c21073a1a1cc5a303089178bc055b3385789e16c9b1c193` |
 
 ### Code
 
@@ -114,7 +145,8 @@ python -c "from config import LLM_POI_SYSTEM_PROMPT as p; from lib.llm_client im
 The last line must print `257a72e709cb`. Copying is safe: the four `lib/`
 files on `final-pipeline` are unchanged since the server took them (checked
 against `fcad281`). The server's `config.py` is `final-pipeline`'s plus the
-appended STEP 07 block, with no line removed. Never merge the two branches.
+appended STEP 07 block and the comment above `LLM_MODEL` (2026-10-02), with no
+line removed. Never merge the two branches.
 `README.md` and `docs/linux-server-handoff.md` describe the server; leave
 them there. The run lock uses `fcntl`, which Windows lacks; the code then
 simply skips the lock.
