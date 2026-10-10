@@ -2601,3 +2601,2590 @@ confidence:
 - low    → neither: the occupant line is generic and the building lines say
            no more than that it is a building of some class and size
 """
+# Step 07.6 - the answers onto the POIs (notebook 07 section 6, on Windows only). The
+# prompt hash of the full run is pinned, so a later edit of LLM_POI_SYSTEM_PROMPT cannot
+# hide the answers: 7,864 valid answers, run finished 2026-10-02 00:53 on the Linux server.
+LLM_POI_RUN_PROMPT_SHA = "257a72e709cb"
+# Layer building_pois: the 7,864 asked POIs with their labels. Layer buildings: step 06's
+# buildings, every column unchanged, plus mid_labels_merged - the building's labels and its
+# asked POIs' labels, each once (decided 2026-10-01: a label clash is merged). Step 08 reads it.
+POI_CLASSIFIED_FILE = OUTPUT_DIR / "07_building_pois_classified.gpkg"
+
+# ──────────────────────────────────────────────
+# STEP 08 — redistribution: the VISUM zone targets onto buildings and POIs
+# ──────────────────────────────────────────────
+# Each zone's target per category is shared out over the units in that zone that carry
+# the category, in proportion to their weight; a building's value is the sum of its units.
+# Decided with the user 2026-10-02; the size measure, the labels and the shares revised on
+# 2026-10-05:
+#   * units: a building without asked POIs is one unit with its step-06 labels (sole
+#     occupants, buildings without own POIs). In a building with asked POIs (step 07) every
+#     asked POI is a unit under its own labels, Workers included;
+#   * every unit weighs the floor area it occupies, O (2026-10-05: the Bosserhof rates are
+#     workers per 100 m2 of floor area, BUG-04 of the previous pipeline; volume before):
+#     Workers O x BOSSERHOF_WEIGHTS[class], each other zone category O / k_red, k_red the
+#     unit's redistributed non-work labels. O follows from the floor area (footprint x
+#     storeys) and the rules per class in the block "Step 08 on occupied floor area" below -
+#     a shop under flats takes the ground floor, a hall is one storey, a main occupant takes
+#     what the tenants leave;
+#   * a label the building's step-06 labels carry but none of its asked POIs does stays as a
+#     "rest" unit on the floor its POIs leave free (at most the floor its class rule gives a sole
+#     occupant; one average occupant's share where the POIs fill it; 2026-10-06), split over the
+#     building's labels (REDIST_KEEP_UNCOVERED_BUILDING_CATEGORIES; the user chose to keep all);
+#   * the labels of steps 06 and 07 are reconciled by OSM use; a Retail or Leisure rest label whose
+#     evident source is an active asked POI that step 07 labelled otherwise goes, and a label taken off
+#     a POI does not come back as a rest unit (LABEL_RULES; the user, 2026-10-08);
+#   * the remaining items of the audit of run 7 - staff catering, OSM-only storeys, the visitor rates,
+#     the sizes of POI units, the Workers-0 rules and factors, the leftovers - at the end of the block
+#     "Step 08 on occupied floor area" (the user, 2026-10-09);
+#   * round 16 - big low office boxes, the sizes of single tenants by format, the published retail floor
+#     of 7 malls, the labels the rules use in the file - after them; staff shops, the meetup of audience
+#     venues net of their Leisure share and heritage POIs as keys of STAFF_CATERING_RULES and
+#     VISITOR_RULES (round 16, 2026-10-09, on the user's behalf);
+#   * round 17 - sport halls and studios one storey where only the height gave more and the places
+#     known to be closed after them; the hall evidence of the big low office boxes in FLOOR_OFFICE_BOX
+#     (their halls in CLASS_FIX_BUILDINGS); the OSM signs of non-use in the vacancy block below (round
+#     17, 2026-10-09, on the user's behalf);
+#   * site rows give no unit (share_of_site is an audit column). A landuse pair no longer
+#     holds floor: the shares are re-split over the asked POIs (2026-10-05, reversing the
+#     2026-10-01/02 rule under which 216 shared buildings kept less than their full volume);
+#     a vacant pair keeps its empty slot;
+#   * a zone with a target but no carrier widens ring by ring through the zones that touch
+#     it until carriers are found; the ring is pooled and listed in notebook 08;
+#   * a building's zone is the zone holding its representative point; buildings in no zone
+#     (226, mostly outside the study area) get nothing;
+#   * vacant places get nothing (REDIST_EXCLUDE_VACANT, below).
+ZONE_TARGETS_FILE = INPUT_DIR / "zone_targets.gpkg"
+ZONE_LAYER = "regionbsstructuredata_zone"       # VISUM structure data; ZONE_COLUMN_MAP fits this layer only
+ZONE_ID_COL = "NO"                              # the VISUM zone number, unique
+# The seven target categories: a zone column, or the sum of several (missing values count
+# as 0). From the previous pipeline (54629cb), unchanged. Leisure SG_6_FR~23 equals
+# SG_6_FR~22 + SG_6_FR~24 in every zone; the six other SG_6_* / SG_7_* columns (BE~20, BE~21,
+# GE~25, PR~26, SONST, AN~27: 10,378 in total, meaning not documented) are not used.
+ZONE_COLUMN_MAP = {
+    "Workers":          "SG_3_BE~17",
+    "School":           ["SG_4_BS", "SG_4_GSCH", "SG_4_WFSCH"],
+    "University":       "SG_4_HS",
+    "Kindergarten":     "SG_4_KITA",
+    "Retail_Daily":     "SG_5_EK_TB",
+    "Retail_Non-Daily": "SG_5_EK~19",
+    "Leisure":          "SG_6_FR~23",
+}
+# MiD label -> target category. Labels are never merged (the user, 2026-10-05: "dont merge any
+# label"): only the seven labels with a VISUM zone total are redistributed. Until then business
+# counted as Workers, errands as Retail_Daily and sports / meetup / lessons as Leisure (54629cb).
+# Errands no longer feeds Retail_Daily - in run 1, 57 % of Retail_Daily rested on errands alone,
+# and pharmacies, banks and post counters labelled only errands lose it too (pharmacies carry it by
+# their own use since 2026-10-08, LABEL_RULES); at the time 34 zones lost their only Retail_Daily
+# carriers (7,231, 0.8 %; 32 zones and 7,111 in run 14), which go to the ring fallback. Leisure comes only
+# from the leisure label (46 % of it sat on units whose only Leisure came from sports, meetup or
+# lessons: churches, sports halls, clubs). The VISUM Leisure column stays SG_6_FR~23 (= FR~22 +
+# FR~24, whose meaning is unknown; the user, 2026-10-05).
+MID_LABEL_TO_ACTIVITY = {
+    "work":             "Workers",
+    "school":           "School",
+    "university":       "University",
+    "childcare":        "Kindergarten",
+    "retail_daily":     "Retail_Daily",
+    "retail_non_daily": "Retail_Non-Daily",
+    "leisure":          "Leisure",
+}
+# The five labels without a zone total (the user, 2026-10-05): never redistributed, they feed no
+# category. Each gets an area - the unit's occupied area O / k_all, k_all = ALL the unit's
+# non-work labels (redistributed or not), so that no area is counted twice; on a rest unit the
+# building's labels - and later an absolute value, area x a visitor rate (VISITOR_RATES), "the
+# area x density value from Bosserhof ... so no redistribution in such case".
+REDIST_AREA_LABELS = ("business", "errands", "sports", "meetup", "lessons")
+# The visitor rates of these labels: VISITOR_RATE_ANCHORS and the lookup tables in the block "Step 08
+# on occupied floor area" below (agreed by the user, 2026-10-06).
+# Workers factor per Bosserhof class (54629cb, with its added "retail wholesale"): workers per
+# 100 m2 of floor area, the midpoint of the range in the previous pipeline's source table
+# (Final-data-processing; 54629cb mislabelled it "per 100 m3 of building volume"). Used as a
+# relative weight inside a zone - occupied floor area x factor - so only the ratios matter; the
+# zone target sets the number. Three rates fixed by the user on 2026-10-05 against their
+# sources, with the headline means that contain them:
+#   * vehicle / electrical repair 2.0 -> 2.5: 30-60 m2 per employee = 1.67-3.33 per 100 m2;
+#   * nursing homes 0.62 -> 1.25: 0.45-0.80 was staff per place, not per 100 m2 (FGSV 1.0-1.5);
+#   * retail small scale 3.75 -> 3.5: 20-50 m2 per employee = 2.0-5.0 per 100 m2;
+#   * services 2.31 -> 2.36, public facilities 1.2 -> 1.30, retail 1.75 -> 1.725: the means of the
+#     same 11, 6 and 10 subclass rows with the fixed values.
+BOSSERHOF_WEIGHTS = {
+    "transport":                        0.5,
+    "yards depots storage areas construction yards": 0.85,
+    "highly productive industries machine material or space intensive": 0.85,
+    "others industrial":                1.85,
+    "craft businesses":                 1.9,
+    "craft courtyards":                 1.85,
+    "normal office":                    2.9,
+    "open plan office":                 4.15,
+    "business oriented services":       3.5,
+    "customer oriented services":       3.0,
+    "hotels":                           1.5,
+    "hotels with conference areas":     0.8,
+    "restaurants gastronomy":           1.9,
+    "suppliers for car dealerships":    1.7,
+    "vehicle electrical repair":        2.5,
+    "customer service":                 3.3,
+    "car dealerships":                  0.7,
+    "wholesale":                        2.45,
+    "retail small scale":               3.5,
+    "discount stores":                  0.9,
+    "diy stores":                       0.75,
+    "furniture stores":                 0.55,
+    "hypermarkets superstores":         1.2,
+    "shopping centers":                 3.1,
+    "self service department stores":   1.1,
+    "department stores":                1.55,
+    "factory outlet centers":           2.15,
+    "retail wholesale":                 2.1,
+    "schools":                          1.0,
+    "universities":                     0.75,
+    "research institutes":              1.25,
+    "kindergartens":                    2.3,
+    "hospitals":                        1.25,
+    "nursing homes":                    1.25,
+    "entertainment culture":            1.67,
+    "large cinemas":                    0.83,
+    "musical theatres":                 1.43,
+    "large discos fun leisure pools":   0.8,
+    "arenas large events":              1.43,
+    "theme parks":                      1.67,
+    "fitness wellness":                 0.8,
+    "industrial operations production": 1.35,
+    "crafts and trades":                1.88,
+    "services":                         2.36,
+    "retail":                           1.725,
+    "public facilities":                1.30,
+    "facilities for culture leisure and sports": 1.23,
+}
+# The step-05 class names are normalised before the lookup - lower case, every run of
+# non-letters to one space - then mapped by this table (54629cb, unchanged; for the step-05
+# classes only "others" needs it).
+BOSSERHOF_NORMALIZATION_MAP = {
+    "others":                           "others industrial",
+    "industrial operations production others":
+        "industrial operations production",
+    "highly productive industries":
+        "highly productive industries machine material or space intensive",
+    "services normal office":           "normal office",
+    "industrial operations others":     "industrial operations production",
+    "industrial operations production highly productive industries machine material or space intensive":
+        "highly productive industries machine material or space intensive",
+    "yards depots storage areas":
+        "yards depots storage areas construction yards",
+    "services customer oriented services": "customer oriented services",
+    "facilities for culture leisure and sports fitness wellness": "fitness wellness",
+    "fun leisure pools":                "large discos fun leisure pools",
+}
+REDIST_WORKERS_WEIGHT = "floor_x_bosserhof"     # or "floor": occupied floor area x factor (2026-10-02 on volume, floor area since 2026-10-05)
+REDIST_KEEP_UNCOVERED_BUILDING_CATEGORIES = True  # the rest units above (decided 2026-10-02: keep all)
+REDIST_MULTI_CATEGORY_SPLIT = "even"            # O / k_red over the redistributed labels ("separate splits", the user, 2026-10-05), or "full": O each
+# Vacancy (the user, 2026-10-02; widened 2026-10-05): a place with a clear sign that nobody is
+# there gets no part of any target - it gives no unit at all (lib/vacancy.py):
+#   * a POI: tagged shop=vacant or office=vacant (whatever else it carries), poi_use in
+#     VACANCY_POI_USES (vacant; ruins - the user counts every ruin as vacant), its own tags
+#     matching VACANCY_POI_TAG_PATTERN (disused / abandoned / vacant = yes, ruins), named
+#     "Leerstand" / "zu vermieten", or its step-07 type (poi_type) says so (the text rule below);
+#   * a building: it has own POIs and ALL of them carry such a sign; or an OSM building polygon
+#     with a vacancy tag (building=ruins / abandoned / disused / vacant / collapsed / destroyed,
+#     disused / abandoned / vacant = yes, ruins, abandoned:building / disused:building = yes - any
+#     value until run 16 -,
+#     shop / office = vacant) covers at least VACANCY_POLYGON_MIN_COVER of its footprint and no
+#     active POI is inside (the user, 2026-10-05: with an active POI inside the building keeps
+#     it and is listed for review); or its step-05 type (llm_type) says so;
+#   * the text rule: vacant, unoccupied, abandoned, disused, derelict, currently / permanently
+#     closed, ruin(s/ed), burnt-out, out of use / service, no longer in use - but not a place
+#     "with a few vacant units" (partly vacant).
+# A shared building whose other tenants are active keeps them (the user, 2026-10-05): the vacant
+# unit's share carries nothing, the active tenants keep theirs. Run 1 with the first rule: 74
+# buildings and 1 asked POI, about 7,900 of the placed demand; the building polygons' own tags
+# were not read then (63 weighted buildings under such a polygon, 17,265 of the demand).
+# The OSM signs of non-use (round 17, 2026-10-09, on the user's behalf; the user: "if there is a
+# tag letting you know that it's empty, vacant, unused or anything like that then respect OSM
+# tags"; VACANCY_OSM_SIGNS, lib/vacancy.osm_signs), each class checked against the live OSM history
+# of all 266 such objects on model buildings and about 30 places on the web:
+#   * a building under works or gone - building=construction (where it says what is built,
+#     construction=*, or was checked, check_date: a bare outline can be years old), demolished,
+#     razed, removed - whatever else the object carries (the Stadthalle Braunschweig, the
+#     demolished real store at Wolfsburg-Nordsteimke);
+#   * a lifecycle prefix on a use key (disused:shop=*, was:amenity=*, abandoned:office=* ...) only
+#     where the object has no active primary tag: with one it records a former use of a place
+#     active today (the pub tagged disused:shop=supermarket, 2026-10-05); the gone prefixes on
+#     building (demolished:building=* ...) on the same terms; disused / abandoned:building only as
+#     =yes (a value naming a former building type - train_station - is no sign);
+#   * opening_hours closed / off / no / geschlossen / temporarily closed (the whole value, also after
+#     Mo-Su, PH or 24/7: closed now), not on a workshop (no public hours);
+#   * an end_date before the day of the check, without an active primary tag;
+#   * a name, note, description or fixme saying it for good: 'dauerhaft geschlossen', 'Leerstand',
+#     'steht leer', 'closed since' ... - not a weekly closing day, a dated closure, a question, a
+#     negation or a part of the building (a flat, a floor); 'ehemals' / 'former' tell a building's
+#     history, not its use;
+#   * shop=no without another active primary tag, not at a fuel station (there it means no shop).
+# A building that only such a sign leaves empty keeps its units where it lies on the named site of
+# an active occupant (GONE_BUILDINGS' exception) and is listed for review, like a building with an
+# active POI under a tagged polygon. An OSM object whose sign a dated source contradicts gives no
+# sign ('stale_ids': Netto Hillerse, open again since 2025-12-09; the Wolfsburg library Nordstadt,
+# open on Thursdays). Alone against run 16 (before the stale ids): 113 buildings and 16 asked POIs
+# give no unit and one comes back (a ski club under a former station,
+# abandoned:building=train_station); Workers 2,579 (0.44 %), Retail_Daily 11,916 (1.31 %),
+# Retail_Non-Daily 2,927 and Leisure 891 move.
+REDIST_EXCLUDE_VACANT = True
+VACANCY_POI_USES = frozenset({"vacant", "ruins"})
+VACANCY_NAME_PATTERN = r"\bleerstand\b|\bzu vermieten\b"
+VACANCY_POI_TAG_PATTERN = r'"(?:disused|abandoned|vacant)"\s*:\s*"yes"|"ruins"\s*:\s*"(?!no")[^"]+"'
+VACANCY_TEXT_PATTERN = (r"\b(?:vacant|unoccupied|abandoned|disused|derelict)\b|\b(?:currently|permanently) closed\b"
+                        r"|\bruin(?:s|ed)?\b|\b(?:burnt|burned)[- ]out\b|\bout of (?:use|service)\b|\bno longer in use\b")
+VACANCY_PARTIAL_PATTERN = r"\bwith (?:a few|some|several|two|three|four|\d+) vacant\b"
+VACANCY_BUILDING_VALUES = frozenset({"ruins", "abandoned", "disused", "vacant", "collapsed", "destroyed"})
+VACANCY_BUILDING_TAG_PATTERN = (r'"(?:disused|abandoned|vacant)"\s*:\s*"yes"|"ruins"\s*:\s*"(?!no")[^"]+"'
+                                r'|"(?:disused|abandoned):building"\s*:\s*"yes"')   # =yes only (round 17)
+VACANCY_POLYGON_MIN_COVER = 0.5                 # share of the building's footprint under the tagged OSM polygon(s)
+# the OSM signs of non-use read since round 17 (the comment above; lib/vacancy.osm_signs):
+VACANCY_OSM_SIGNS = {
+    "lifecycle_prefixes": ["disused", "abandoned", "was", "demolished", "razed", "removed", "destroyed"],   # a lifecycle prefix ...
+    # ... on a use key, where the object has no active primary tag
+    "lifecycle_keys": ["shop", "amenity", "office", "leisure", "craft", "healthcare", "tourism", "club", "power", "military"],
+    "gone_prefixes": ["demolished", "razed", "removed", "destroyed"],   # <prefix>:building=* - the building itself is gone
+    "building_yes_prefixes": ["disused", "abandoned"],   # disused / abandoned:building=yes - the building is unused
+    # the primary tags (the use keys of the lifecycle prefixes) ...
+    "active_keys": ["shop", "amenity", "office", "leisure", "craft", "healthcare", "tourism", "club", "power", "military"],
+    "inactive_values": ["vacant", "no", "empty", "closed", "disused", "abandoned", "none"],   # ... and the values that make one no active tag
+    "works_values": ["construction", "demolished", "razed", "removed"],   # building=* under works or gone
+    "construction_needs_detail": True,              # a bare building=construction outline can be years old
+    "opening_hours_pattern": (r"^\s*(?:(?:mo-su|ph\s*,\s*mo-su|mo-su\s*,\s*ph|24/7)\s+)?(?:off|closed|geschlossen|no"
+                              r"|temporarily closed)\s*$"),   # the whole value: closed now
+    "opening_hours_exempt_keys": ["craft"],         # a workshop: 'off' means no public opening hours
+    "end_date_before": "2026-10-09",                # an end_date before this day, without an active primary tag
+    "note_keys": ["name", "note", "note:de", "description", "description:de", "fixme", "FIXME"],   # texts saying it for good ...
+    "note_pattern": (r"dauerhaft\s+geschlossen|endgültig\s+geschlossen|permanently\s+closed|closed\s+since"
+                     r"|closed\s+(?:at\s+the\s+)?end\s+of|seit\s+(?:dem\s+)?\d[\d.]*\s+geschlossen"
+                     r"|(?<![a-zäöüß])leerstand(?![a-zäöüß])|(?<![a-zäöüß])leerstehend|steht\s+leer|zurzeit\s+leer|derzeit\s+leer"),
+    # ... but not a question, a dated closure, a reopening, a negation or a part of the building (a flat, a floor)
+    "note_exclude_pattern": (r"\?|(?<![a-zäöüß])bis(?![a-zäöüß])|wiedereröffn|wieder\s+geöffnet"
+                             r"|(?<![a-zäöüß])(?:kein|keine|nicht|not|no)\s+(?:mehr\s+|more\s+|longer\s+)?(?:leerstand|leer|dauerhaft"
+                             r"|endgültig|permanently)|(?<![a-zäöüß])wohnung|(?<![a-zäöüß])\d+\.?\s*og(?![a-zäöüß])|(?<![a-zäöüß])etage"
+                             r"|teilweise|partly|partially"),
+    "note_on_polygons": True,                       # False: a note on a building outline is not read (option A2)
+    "shop_no": True,                                # shop=no without an active primary tag, not at a fuel station
+    "keep_named_site": True,                        # GONE_BUILDINGS' exception: a building on the named site of an active occupant stays
+    # OSM objects whose sign a dated source contradicts (the place is in use): no sign is read from them; drop an entry once
+    # step 01 is re-extracted after the object was fixed
+    "stale_ids": {
+        "way/59551753": ("Netto Hillerse (Schier-Raehmen-Weg): the new store opened on 2025-12-09 "
+                         "(https://www.neueroeffnung.info/hillerse/netto-markendiscount_2853, update of 2025-11-25; the Samtgemeinde "
+                         "Meinersen: demolition for the new build from 2025-06-16; seen 2026-10-09); OSM still says building=construction, "
+                         "opening_hours=temporarily closed"),
+        "node/703484396": ("Stadtteilbibliothek Nordstadt, Hansaplatz 17, Wolfsburg: open on Thursdays 10-12:30 and 15-17:30, run by "
+                           "volunteers (https://www.bildungshaus-wolfsburg.de/oeffnungszeiten-standorte/, seen 2026-10-09); OSM "
+                           "opening_hours=off since 2024-07-06"),
+    },
+}
+# --- Step 08 on occupied floor area: the rules per class (the user, 2026-10-05) -----------------
+# Every unit weighs the floor area it occupies, O, instead of the building's volume x share:
+# Workers O x factor, a redistributed label O / k_red. O starts from the building's floor area
+# FA = footprint A x storeys N and follows the rules below (lib/floor_rules.py): the storeys of
+# the building (the 08b height rule with its halls, plus the structure rules), whether it has
+# dwellings (the residential context RC), and per occupant a floor family - a shop under flats
+# takes the ground floor, an office flat one storey, a main occupant what the others leave.
+# Decided with the user on 2026-10-05 from the evidence of seven analysts, a synthesis and a
+# stress test, and from the colleague's Stage 5-8 rules (VISUM-quality-analysis, all 13 rule
+# counts reproduce on our data).
+
+# Floors that no unit occupies in a building WITHOUT dwellings - the upper floors above a shop
+# that keeps one floor, a Kita's third storey, the floors a capped point leaves - become one
+# Workers-only "remainder" unit (the unmapped upper-floor tenants) at the normal-office factor
+# (the user, 2026-10-05; the building's own factor would count offices above a shop at the
+# retail rate). It is formed after the hall and box checks, never from a vacant slot and never
+# where an ALL unit takes the floor. With dwellings the free floors are flats and carry nothing.
+# The office factor holds in shop and office buildings (REDIST_REMAINDER_OFFICE_CLASSES); in any other
+# building - a hospital, a Kita, a school, a museum, a gym - the free floor is the building's own main
+# use and carries its own factor (the user, 2026-10-06: a hospital's 52,213 m2 of free floor at 2.9
+# instead of 1.25 doubled the Workers weight of about 200 such buildings).
+REDIST_REMAINDER_WORKERS_FACTOR = 2.9
+REDIST_REMAINDER_OFFICE_CLASSES = frozenset({"retail (small-scale)", "Retail", "restaurants / gastronomy", "customer-oriented services",
+                                             "customer service", "Services", "business-oriented services", "normal office",
+                                             "open-plan office"})
+
+# The storeys: the decided 08b rule (STEP 08b: eaves height capped at the mean height, 3.5 m,
+# halls one storey, OSM building:levels over both) and then these structure rules, in this
+# order, where OSM building:levels is not mapped (parking also where it is):
+#   * a hall class whose head says residential / mixed use: one storey (the flats carry nothing);
+#   * a hall word before the office word ("Workshop and office of X", "Office and warehouse"):
+#     one storey; "Office building in an industrial estate", "Factory site office building" and
+#     "Administrative villa serving the factory" stay;
+#   * the crafts classes: never above one storey;
+#   * storeyed company uses on factory sites (high-rise, training centre, R&D, laboratory, social
+#     building, occupational health): storeys by height, not a hall (Konstruktionshochhaus 1 ->
+#     11); canteen buildings there at most FLOOR_CANTEEN_MAX_STOREYS;
+#   * worship buildings, fire and rescue stations (not professional ones or office heads), sports
+#     halls / pools / riding halls ("gymnasium" only with a sport word or class, 132 German
+#     Gymnasium schools otherwise), hangars, wind tunnels, auditoria and towers (not office,
+#     residential, hotel or cooling towers, tower blocks or church towers): one storey;
+#   * parking garages and decks (ALKIS 2461/2462, OSM building=parking, a parking head): one
+#     storey, over OSM levels too (5 of 11 had levels 4-6);
+#   * cinemas at most FLOOR_CINEMA_MAX_STOREYS; 'factory outlet' and small-shop brand words
+#     (Jacques' Wein-Depot, Games Workshop) no longer make a hall - a brand word only where the
+#     hall word of the type also stands in the building's name or a POI name, so that a
+#     "Commercial hall housing a greengrocer and a copy shop" stays a hall; IKEA
+#     FLOOR_IKEA_STOREYS;
+#   * the multi-level furniture houses (the user, 2026-10-05): storeys by height, at most 4;
+#   * single-level boxes outside the hall classes (the user, 2026-10-05): one storey;
+#   * one storey where only the height gave more (the user, 2026-10-08; FLOOR_ONE_STOREY_RULES):
+#     low shops and restaurants, shops with store evidence, low shop boxes, farm halls filed as
+#     shops or restaurants, station shops and fuel-station canopies;
+#   * department stores and shopping centres count 4.5 m storeys (the user, 2026-10-05);
+#   * malls take their mapped levels, else at most 3 (FLOOR_MALL_*); outlets at most 2.
+# Not adopted: a 5 m storey for museums, the deep-plan office test, HALL over OSM levels, and
+# the colleague's mean height, h / 3.8, 4-storey cap and >= 10,000 m2 rule.
+# The type words, read in the head of the step-05 type (the text before "with", "housing", a
+# comma ... - HALL_TYPE_HEAD_SPLIT) unless FLOOR_FULL_TYPE_KEYS names them; from the synthesis,
+# with the stress-test fix that a bare "Dom" no longer makes a church ("Centrum am Dom" mall):
+FLOOR_TYPE_PATTERNS = {
+    "worship":        r"\b(?:church|chapel|cathedral|minster|mosque|synagogue|kingdom hall|temple|mourning hall|funeral hall|kirche|kapelle)",
+    "worship_excl":   (r"\b(?:parish (?:office|house|hall|centre|center|home)|community (?:centre|center|hall|house)|offices?|school|nursery"
+                       r"|kindergarten|daycare|housing|residential|apartments?|rectory|parsonage|pfarrhaus|gemeindehaus|kita|monastery|convent)\b"),
+    "fire":           r"\bfire[- ]?(?:station|brigade|department|service)|\bfeuerwehr|\bfeuerwache|\brescue station|\bambulance station|\brettungswache",
+    "fire_prof":      r"\bprofessional fire|berufsfeuerwehr|\bmain fire station|hauptfeuerwache|fire and rescue (?:centre|center)",
+    "tower":          r"\btowers?\b|\bturm\b",
+    "tower_excl":     r"\b(?:office|residential|apartments?|tower block|high[- ]rise|hotel|church|cooling)\b",
+    "parking":        r"\bparking (?:garage|deck|structure|facility|building)|multi[- ]stor(?:e)?y car park|\bcar park\b|\bparkhaus\b|\bparkdeck\b",
+    "cinema":         r"\bcinema|multiplex|\bkino\b|filmpalast|movie theat",
+    "museum":         r"museum",
+    "sports_hall":    (r"\bsports? halls?\b|\bgym(?:nastics)? halls?\b|\bturnhalle|\bsporthalle|\btennis ?halls?\b|tennishalle|\briding (?:hall|arena)"
+                       r"|\bindoor (?:riding|arena|tennis|sports)|reithalle|\bice (?:rink|arena|stadium|hall)|eissporthalle|\bclimbing hall"
+                       r"|\bbouldering hall|\bshooting hall|\bkart(?:ing)? hall|\bmulti[- ]purpose hall|\bevent hall|\bexhibition hall|\bfestival hall"),
+    "gym_word":       r"\bgymnasium\b",
+    "gym_sport":      r"sport|school gymnasium|indoor",
+    "pool":           r"\bswimming (?:pool|bath|hall)|\bindoor (?:pool|swimming)|\bhallenbad|\bleisure pool|\bwater park|\bthermal bath|\baquatic",
+    "hangar":         r"\bhangars?\b|\bwind tunnel",
+    "auditorium":     r"\bauditorium|\baudimax",
+    "canteen":        r"\bcanteen|\bmensa\b|\bcafeteria|\bstaff restaurant|\bdining hall|\bbetriebsrestaurant",
+    "storeyed_co":    (r"\bhigh[- ]rise|\bhochhaus|\btraining (?:centre|center|academy)|\bacademy\b|\bR&D\b|\bresearch (?:and development )?"
+                       r"(?:centre|center|building)|\blaborator(?:y|ies)\b|\bsocial (?:building|facilities)|\bworks council|\boccupational health"),
+    "office_any":     r"\boffices?\b|\bheadquarters\b|\badministrat\w*",
+    "town_hall":      r"\b(?:town|city)\s+halls?\b",
+    "res_head":       r"\b(?:residential|apartments?|dwellings?|mixed\W?use)\b",
+    "factory_outlet": r"factory[- ]outlet",
+    # student dormitories only (2026-10-06): not nurses', staff, boarding-school or Lebenshilfe homes, children's homes,
+    # or a coworking office in a student dormitory - the head must name the student dormitory
+    "dorm":           (r"^\W*(?:(?:a|an|the)\s+)?(?:university\s+)?(?:students?|studenten|studierenden)(?:\s+(?:accommodation|apartments?))?"
+                       r"\s*(?:dormitor\w*|residence|housing|hall|accommodation|apartments?|wohnheim)|^\W*studenten(?:wohnheim|apartments?)"),
+    "small_school":   (r"\bdriving school|\bmusic school|\bart school|\btutoring|\badult education|\bvolkshochschule|\blanguage school|\bdance school"
+                       r"|\bdancing school|\bnachhilfe|\bmusikschule|\bfahrschule"),
+    "small_unit":     (r"\bcommunity (?:centre|center|room|hall)|\bclub ?(?:room|house|home)|\bclubhouse|\byouth (?:centre|center|club)|\bfraternity"
+                       r"|\bstudent association|\barcade|\bcasino|\bgaming|\blibrary branch|\bgallery|\bmusic school|\bassociation"),
+    "gym_studio":     r"\bgym\b|\bfitness|\bdance|\byoga|\bstudio|\bmartial|\bsauna|\bpilates|\bcrossfit|\bboxing|\bkarate|\bjudo|\bdojo",
+    "public_office":  r"\bparish office|\bpfarramt|\bcounsel|\badvice|\bberatung|\boffices?\b|\bagency\b",
+    "care":           r"nursing|care home|residential care|senior|assisted[- ]living|altenheim|pflege|refugee|asylum|youth (?:home|welfare)|children.s home",
+    "pure_home":      (r"^(?:\W*(?:a|an|the)\s+)?(?:private\s+|small\s+|single[- ]family\s+|two[- ]family\s+|detached\s+|semi[- ]detached\s+)*"
+                       r"(?:residential (?:building|house|home)|house|home|dwelling|apartment building|residential apartment building)\b"),
+    "pure_home_excl": (r"ground[- ]floor|shop|store|office|practice|restaurant|caf[eé]|business|commercial|trade|services|workshop|mixed|church|club"
+                       r"|school|kindergarten|hotel|guest|holiday"),
+    "small_attraction": r"trampoline|adventure hall|\btent\b|kiosk",
+}
+FLOOR_FULL_TYPE_KEYS = ("care", "pure_home_excl")
+# ALKIS building functions (31001_xxxx) the structure rules read.
+FLOOR_ALKIS_CODES = {
+    "worship":     frozenset({3041, 3042, 3043, 3045, 3046, 3047, 3081}),
+    "fire":        frozenset({3072}),
+    "sports_hall": frozenset({3211, 3221, 2728}),
+    "parking":     frozenset({2461, 2462}),
+}
+# The class lists of the structure rules: crafts never above one storey; storeyed company uses
+# and canteens on the sites of these industry classes; "gymnasium" makes a sports hall in these
+# sport classes; IKEA in these classes; brand words no longer make a hall in these.
+FLOOR_CRAFT_CLASSES = frozenset({"Crafts and trades", "craft businesses"})
+FLOOR_INDUSTRY_CLASSES = frozenset({
+    "Transport", "Industrial operations / Production", "highly productive industries / machine / material or space intensive",
+    "others", "Yards, depots, storage areas, construction yards", "craft courtyards"})
+FLOOR_SPORT_CLASSES = frozenset({"fitness / wellness", "Facilities for culture, leisure and sports", "large discos, fun / leisure pools",
+                                 "arenas, large events"})
+FLOOR_IKEA_CLASSES = frozenset({"hypermarkets / superstores", "furniture stores"})
+FLOOR_BRAND_UNHALL_CLASSES = frozenset({"retail (small-scale)", "Retail"})
+# "Workshop and office of X": the hall word must come before the first location word, and a
+# hall word that only qualifies a site ("factory site", "factory premises") is no hall word;
+# "serving" counts as a location word ("Administrative villa serving the H. Butting factory").
+FLOOR_LOCATION_SPLIT = r"\s+(?:in|on|at|within|of|for|serving)\s+"
+FLOOR_HALL_SITE_PATTERN = r"\b(?:halls?|warehouses?|factory|factories|workshops?|depots?)\s+(?:site|premises|grounds|campus|compound)\b"
+FLOOR_CANTEEN_MAX_STOREYS = 2
+FLOOR_CINEMA_MAX_STOREYS = 2                    # CinemaxX 6 -> 2
+# IKEA (in the name, a POI name or the type; a hypermarket or furniture class, no logistics,
+# warehouse or distribution type): IKEA Braunschweig has two sales levels.
+FLOOR_IKEA_PATTERN = r"\bIKEA\b"
+FLOOR_IKEA_EXCLUDE_PATTERN = r"logistic|warehouse|distribution"
+FLOOR_IKEA_STOREYS = 2
+# Multi-level furniture houses (the user, 2026-10-05): a furniture store with eaves of at least
+# 12.25 m and a footprint of at least 2,000 m2, never a warehouse, Abhollager or hall (in the
+# type) and no "Halle" / "Abhol" in its name, counts its storeys by height, at most 4. These
+# are 9 houses (XXXLutz x5, Porta, POCO, Roller; 1.7 % of Retail_Non-Daily in the synthesis).
+FLOOR_FURNITURE_HOUSE_MIN_EAVES_M = 12.25
+FLOOR_FURNITURE_HOUSE_MIN_FOOTPRINT_M2 = 2000
+FLOOR_FURNITURE_HOUSE_MAX_STOREYS = 4
+FLOOR_FURNITURE_HOUSE_EXCLUDE_TYPE = r"warehouse|abhollager|\bhall"
+FLOOR_FURNITURE_HOUSE_EXCLUDE_NAME = r"halle|abhol"
+# Single-level boxes (the user, 2026-10-05; the stress test found 79 that kept 2-3 storeys only
+# because eaves of 5-9 m round to 2): a building of one of these classes without dwellings, of
+# at least 1,500 m2, eaves at most 12.5 m, no own POI on level 1 or above, whose type (the whole
+# type) names a supermarket, discounter, indoor sport or market hall, counts one storey; so does
+# a shopping centre with eaves below 9 m and no POI above level 0. Since 2026-10-08 the words are
+# read plural-safe (audit item 2: 'two supermarkets', EDEKA + ALDI Ehmen, and 2 more were missed;
+# 2 shopping centres the mall rule set to one storey anyway now count as boxes); 'sports hall'
+# stays singular (a sheltered workshop 'with sports halls' is no box).
+FLOOR_BOX_CLASSES = frozenset({
+    "retail (small-scale)", "Retail", "shopping centers", "fitness / wellness", "Facilities for culture, leisure and sports",
+    "entertainment, culture", "Services", "customer-oriented services", "restaurants / gastronomy"})
+FLOOR_BOX_TYPE_PATTERN = (r"\b(?:supermarkets?|discount\w*|hypermarkets?|cash and carry|kart\w*|soccer"
+                          r"|indoor (?:arena|play|sports?|playground)s?|trampoline|bowling|laser ?tag|climbing|bouldering|paintball"
+                          r"|likely a sports hall|sports hall|market halls?|garden cent(?:re|er)s?|beverage (?:stores?|markets?)"
+                          r"|getr[aä]nkem[aä]rkte?)\b")
+FLOOR_BOX_MIN_FOOTPRINT_M2 = 1500
+FLOOR_BOX_MAX_EAVES_M = 12.5
+FLOOR_MALL_BOX_MAX_EAVES_M = 9.0
+# One storey where only the height says more (the user, 2026-10-08; item 2 of the audit of run 7). The 08b rule counts one
+# storey per 3.5 m, so a one-level shop of 5.25-8.75 m counts 2-3 storeys and the floor nobody uses becomes a Workers-only
+# remainder: run 10c had 1,700 such remainders with 34,023 W. Where OSM records the levels of shops and restaurants, they are
+# one storey in 88-94 % of cases at 5.25-6.0 m, 76 % at 6.0-6.5 m and only about 41 % at 6.5-8.75 m. The user chose:
+#   "Below 6.5 m": shops and restaurants without flats count one storey below 6.5 m (and wherever every OSM outline with levels
+#     says 1), unless a practice, office, school, Kita or hotel sits in them, their type names upper floors, flats or offices, or
+#     residential outlines cover them - 52 of 55 such buildings with OSM levels are one storey; this holds for a branch of a
+#     MULTI_LEVEL_CHAINS chain too (two Deichmann buildings: their two floors become the one);
+#   "Store evidence + farm halls": shops of 800 m2 or more with store words, a box chain or a box shop tag (eaves up to 8.75 m,
+#     9 m from 1,500 m2), shops of 1,000 m2 or more with eaves below 7 m, and shops or restaurants under an OSM barn, shed,
+#     greenhouse or roof outline or with an ALKIS farm, depot or car-wash function; the box words of the decided box rule are read
+#     plural-safe ('supermarkets': EDEKA + ALDI Ehmen). OSM 'industrial' or 'warehouse' outlines are no evidence (an independent
+#     check: such buildings are one storey as rarely as shops are), and the four big halls typed as shops or restaurants
+#     (Anssems, VW Halle 31, tankpool24, Stanze Stahl) wait for a fix of their class ("Leave for a class fix");
+#   "Shop carries the canopy": fuel-station canopies count one storey wherever OSM gives no levels and form no remainder; the
+#     station shop within 15 m takes the canopy's labels and the canopy no unit (Hoyer: the canopy roof held 968 Retail_Daily,
+#     95 % of its zone; its cafe now takes 771, the zone's other shops the rest); station shops (ALKIS 2130) count one storey.
+# Against run 11: 574 buildings change storeys and 7,179 W move (1.2 %), Retail_Daily 7,093 (0.8 %), Retail_Non-Daily 1,122,
+# Leisure 65; remainder W 34,023 -> 27,246; errands -383, business -22, sports -158 (the gym in an Action / Takko box).
+FLOOR_ONE_STOREY_RULES = {
+    "shop_classes": ["retail (small-scale)", "Retail"],
+    "restaurant_classes": ["restaurants / gastronomy"],
+    "service_classes": ["customer-oriented services", "customer service", "Services"],
+    # OSM outlines: twin, cover or part at role_min; outlines over outline_min_share of the footprint must all say 1 and cover
+    # osm_min_cover together; 2 levels over two_min_share of it keep the storeys; a service building (its own unit halves)
+    # also needs a level-1 twin or part over osm_min_cover, no roof:levels and a height below osm_service_max_height_m
+    "role_min": 0.5,
+    "outline_min_share": 0.10,
+    "two_min_share": 0.2,
+    "osm_min_cover": 0.5,
+    "osm_service_max_height_m": 7.5,
+    # low_shop
+    "low_max_height_m": 6.5,
+    "upstairs_groups": ["health_practice", "office", "public_office", "small_school", "childcare", "hotel"],
+    "storeyed_pattern": (r"medical cent(?:re|er)|[aä]rzte|health cent(?:re|er)|practices|(?<!post )\boffices?\b|administrat|mixed[- ]use"
+                         r"|hotel|guest ?house|gasthaus|gasthof|\bpension\b|\binn\b|residential|apartments?|\bflats?\b|dwellings?"
+                         r"|upper[- ]floors?|upstairs|storey"),
+    "res_outline_tags": ["apartments", "residential", "house", "detached", "semidetached_house", "terrace", "farm", "bungalow",
+                         "dormitory"],
+    "res_outline_min_share": 0.2,
+    # box_evidence / box_low (shops only; never with an own POI that usually sits upstairs, a gym included)
+    "box_type_pattern": (r"\b(?:supermarkets?|discount\w*|hypermarkets?|cash and carry|kart\w*|soccer|indoor (?:arenas?|play\w*|sports?)"
+                         r"|trampolines?|bowling|laser ?tag|climbing|bouldering|paintball|likely a sports hall|sports halls?|market halls?"
+                         r"|garden cent(?:re|er)s?|beverage (?:stores?|markets?)|getr[aä]nkem[aä]rkte?)\b"
+                         r"|\b(?:beverage (?:shops?|retail\w*|outlets?|stores?|markets?)|drinks? (?:stores?|markets?|shops?)|getr[aä]nke\w*"
+                         r"|grocery (?:stores?|markets?)|food (?:stores?|markets?|retail\w*|discount\w*)|lebensmittel\w*"
+                         r"|drug ?stores?|chemists?(?:'s)? (?:shops?|stores?)|drogerie\w*"
+                         r"|pet (?:supply|supplies|shops?|stores?|food|superstores?)|zoo ?(?:&|and) ?co|zoofachmarkt|futterhaus|fressnapf"
+                         r"|diy|do-it-yourself|hardware (?:stores?|shops?)|home[- ]improvement"
+                         r"|building (?:materials?|supplies|supply) (?:stores?|shops?|centres?|centers?|merchants?|markets?|dealers?)"
+                         r"|baumarkt\w*|baustoff\w*|builders'? merchants?"
+                         r"|garden (?:cent(?:re|er)s?|markets?|stores?|shops?)|gartencenter|gartenmarkt|plant (?:shops?|stores?|nurser\w*)"
+                         r"|horticultural nurser\w*"
+                         r"|furniture (?:stores?|shops?|retail\w*|outlets?|markets?|discount\w*)|m[oö]bel\w*|mattress\w*|bed(?:ding)? (?:stores?|shops?)"
+                         r"|kitchen (?:stores?|studios?|retail\w*|shops?)"
+                         r"|tiles?|fliesen\w*|flooring|carpets?|paint (?:shops?|stores?)|farben"
+                         r"|car parts|auto parts|tyres?|tires? (?:shops?|stores?|cent(?:re|er)s?|dealers?)|reifen\w*"
+                         r"|motorcycle (?:shops?|stores?|dealers?\w*|retail\w*|sales)"
+                         r"|car (?:dealer\w*|showrooms?|sales)|showrooms?|autohaus|agricultural (?:machinery|supply|supplies)|farm (?:supply|supplies)"
+                         r"|landhandel|raiffeisen|trailer"
+                         r"|variety (?:stores?|shops?|discount\w*)|discount (?:stores?|shops?)|sonderpreis|restposten|thomas philipps"
+                         r"|fachmarkt\w*|specialist retail\w*|retail (?:park|warehouse)s?|retail cent(?:re|er)s?|shopping park|big[- ]box"
+                         r"|multi[- ‐]?tenant retail\w*"
+                         r"|electronics? (?:stores?|retail\w*|markets?|superstores?)|mediamarkt|media markt|saturn)\b"),
+    # chains whose stand-alone store is one level, in an own POI's name or brand, the building's or a POI name (not the chains of
+    # MULTI_LEVEL_CHAINS: Deichmann, Roller, MediaMarkt, Saturn)
+    "box_chain_pattern": (r"\b(?:aldi|lidl|netto|penny|norma|np[- ]?(?:markt|discount)?|rewe|edeka|nah ?(?:&|und) ?gut|combi|famila|marktkauf"
+                          r"|kaufland|globus|tegut|denn'?s|alnatura|wolf markt|diska|v-markt"
+                          r"|hol['’]?ab|trinkgut|getr[aä]nke\w*|fristo|big durst"
+                          r"|dm|rossmann"
+                          r"|fressnapf|futterhaus|zoo ?& ?co|kiebitzmarkt|raiffeisen\w*"
+                          r"|kik|tedi|nkd|takko\w*|action|woolworth|thomas philipps|sonderpreis\w*|m[aä]c geiz|euroshop|wreesmann|pfennigpfeiffer"
+                          r"|kodi|tedox|jawoll|postenb[oö]rse"
+                          r"|reno|abc schuh\w*|siemes\w*|ernsting'?s\w*|jeans fritz|adler"
+                          r"|jysk|d[aä]nisches bettenlager|matratzen concord|poco|sconto|reddy\w*|swiss sense"
+                          r"|hagebau\w*|hornbach|obi|bauhaus|toom|hellweg|b1"
+                          r"|expert|euronics|medimax"
+                          r"|a\.?t\.?u|euromaster|vergölst|point s|reifen\.com|wessels \+ m[uü]ller|pv automotive|louis motorrad|polo motorrad"
+                          r"|harley-davidson|decathlon|intersport)\b"),
+    "box_chain_exclude": r"\b(?:c&a|h&m|galeria|karstadt|primark|zara|peek)\b",
+    "box_shop_tags": ["supermarket", "beverages", "pet", "doityourself", "hardware", "garden_centre", "tiles", "car_parts", "tyres",
+                      "furniture", "bed", "kitchen", "motorcycle", "trade", "agrarian", "variety_store", "paint", "car", "wholesale",
+                      "building_materials", "flooring", "fireplace", "trailer", "electrical", "chemist", "electronics", "discount"],
+    "box_upper_groups": ["health_practice", "office", "public_office", "small_school", "sport", "childcare", "hotel"],
+    "box_evidence_tiers": [[1500, 9.0], [800, 8.75]],       # from m2, eaves at most (m) - each tier up to the next
+    "box_low": [1000, 7.0],                                 # from m2, eaves below (m), no evidence needed
+    # hall_tag_code: the outline covering the most of the footprint (hall_min_cover or more) or the ALKIS function; 2-3 storeys,
+    # no practice or office tenant, no storeyed type, no ALKIS residential code (unless over 1,000 m2 at 2 storeys at most)
+    "hall_tags": ["barn", "farm_auxiliary", "greenhouse", "shed", "roof", "carport", "cowshed", "stable", "riding_hall"],
+    "hall_codes": [2131, 2410, 2700, 2720, 2721, 2723, 2724, 2726, 2729],
+    "hall_roof_tags": ["roof", "carport"],                  # these and car washes count in any street-level class
+    "hall_wash_code": 2131,
+    "hall_min_cover": 0.5,
+    "hall_max_storeys": 3,
+    "hall_tenant_groups": ["health_practice", "office", "public_office"],
+    "hall_res_codes": [1000, 1313],
+    "hall_res_keep": [1000, 2],
+    # fuel stations: a canopy is a fuel-station building (ALKIS) under an OSM roof twin or roof outlines over half of it, a
+    # building typed as a canopy, or another building with a fuel word or POI under a roof that is no car wash
+    "station_code": 2130,
+    "station_function": "31001_2130",
+    "fuel_pattern": r"gas station|fuel station|petrol station|filling station|service station|tankstelle|\bfuel\b|\bpetrol\b|truck stop|autohof|canop",
+    "wash_pattern": (r"car ?wash|wash(?:ing)? (?:bay|hall|street|line|tunnel|plant|facility)|waschstra|waschanlage|waschhalle|waschpark"
+                     r"|self[- ]service wash"),
+    "canopy_pattern": r"canop",
+    "canopy_roof_tags": ["roof", "carport", "canopy"],
+    "canopy_roof_min_cover": 0.5,
+    "station_shop_max_dist_m": 15.0,
+    "station_not_shop_head": (r"repair|workshop|garage|car ?wash|truck wash|\bwash|office|residential|apartment|dwelling|industrial"
+                              r"|warehouse|depot|hall\b"),
+    "station_shop_groups": ["small_retail", "food_store", "gastronomy"],
+    # the station shops the 15 m rule misses (a service area further away or not typed as a station) - and a canopy without a POI
+    # on the Salzgitter shopping centre that carries no unit
+    "station_extra_pairs": {"DENIAL0500003Czj": "DENIAL0500003DpW",       # HEM -> the touching 'small commercial shop'
+                            "DENIAL0600003a3G": "DENIAL0600003a4m",       # Aral -> Raststaette Oderwald
+                            "DENIAL03000026au": "DENIAL030000265J",       # Aral Seesen -> Raststaette Harz, 17.5 m
+                            "DENIAL0300000GjK": "DENIAL0300000Gtz"},      # Aral -> the motorway service area, 17.4 m
+    "canopy_no_unit_ids": ["DENIAL0500003DDr"],
+}
+# Department stores and shopping centres count storeys of 4.5 m instead of 3.5 m (the user,
+# 2026-10-05: retail storeys are 4.5-5 m high; Galeria Braunschweig 6 -> 4 storeys), where OSM
+# levels are not mapped, before the mall rule.
+FLOOR_RETAIL_STOREY_HEIGHT_M = 4.5
+FLOOR_RETAIL_TALL_CLASSES = frozenset({"department stores", "shopping centers"})
+# Malls: the distinct whole levels from -1 to 3 mapped on at least 3 of its own POIs, else at
+# most 3 storeys; at most 2 in a parking building or with dwellings on 1,000 m2 or less
+# (Schloss-Arkaden 5 -> 3). Factory outlet centres sell on at most 2 floors.
+FLOOR_MALL_LEVELS = (-1, 3)
+FLOOR_MALL_MIN_LEVEL_POIS = 3
+FLOOR_MALL_MAX_STOREYS = 3
+FLOOR_MALL_SMALL_MAX_STOREYS = 2
+FLOOR_MALL_SMALL_FOOTPRINT_M2 = 1000
+FLOOR_OUTLET_MAX_STOREYS = 2
+
+# Reclassification (the user, 2026-10-05; the colleague's Stage-8 retail rules): a "shopping
+# center" with fewer than 15 POI pairs (site rows included) and a full-range retailer in a POI
+# or parent name is a hypermarket - 8 buildings (Globus, Kaufland x3, REWE Center, Edeka Center
+# x3): factor 1.2 and a hall of one storey (OSM levels still override: Edeka Center Goerge
+# way/799734461 keeps its 2). A shopping centre with "outlet" in a POI or parent name, or an
+# outlet POI, is a factory outlet centre - the 8 Designer Outlets Wolfsburg buildings, not the
+# Odermark strip centre in Goslar that matched through a tenant's name: factor 2.15, at most 2
+# storeys.
+RECLASS_HYPERMARKET_PATTERN = r"globus|kaufland|famila|marktkauf|e-center|e center|edeka-center|edeka center|rewe center|rewe-center|\breal\b"
+RECLASS_HYPERMARKET_MAX_PAIRS = 15
+RECLASS_OUTLET_PATTERN = r"outlet"
+RECLASS_OUTLET_USES = frozenset({"outlet"})
+RECLASS_OUTLET_EXCLUDE = frozenset({"DENIAL030000hlZX"})
+
+# The residential context RC - does the building have dwellings? It switches only the
+# street-level and small-unit uses (shops, gastronomy, services, practices, offices, small
+# schools, Kitas, club rooms, gyms); hotels, nursing homes, hospitals, schools, universities,
+# research, open-plan offices, big boxes, halls, worship, museums and industry keep their rule
+# (ALKIS codes 60 % of hotels and 72 % of nursing homes residential). RC = an ALKIS residential
+# code (1000-1313, 2310 / 2320 / 3100 "... with housing") unless the head names a whole office
+# building, headquarters, administration or town hall (VW Buerozentrum Nord), the OSM twin is a
+# specific non-residential building, or it is a low box (> 1,000 m2, <= 2 storeys) that neither
+# type nor twin confirms (Adler, Metro coded 1000); or an OSM residential twin (house / detached
+# / bungalow / farm only with 2+ storeys); or a residential noun in the type (never the verb
+# "housing": "office building housing a company"). Stress-test fixes: a house twin never makes an
+# explicit non-residential code (2xxx / 3xxx) residential (the courthouse and government offices
+# tagged house / terrace), and a Kita counts as residential only when its type names dwellings.
+RC_ALKIS_RANGE = (1000, 1313)
+RC_ALKIS_CODES = frozenset({2310, 2320, 3100})
+RC_NONRES_ALKIS_RANGE = (2000, 3999)
+RC_RES_TYPE_PATTERN = (r"\bresidential\b(?!\s+(?:care|home|facility|group|school|centre|center))"
+                       r"|\bapartments?\b|\bflats?\b|\bdwellings?\b"
+                       r"|\b(?:with|and|plus|social|student|shared|staff|residential|upper[- ‐]floor|upper)\s+housing\b"
+                       r"|\bhousing\s+(?:above|upstairs|on\s+(?:the\s+)?upper|units?|estate|block|complex)\b|\bhousing\s*$"
+                       r"|\b(?:private|clergy|upper[- ‐]floor|official)\s+residence\b|\bparsonage\b|\bpfarrhaus\b|\brectory\b"
+                       r"|\b(?:single|two|multi)[- ‐]family\b|\b(?:detached|terraced|row|private|farm|town)\s*houses?\b")
+RC_OFFICE_BUILDING_PATTERN = (r"\boffice\s+(?:building|block|complex|tower|park|centre|center|campus)|\bheadquarters\b|\bhead office\b"
+                              r"|\badministrat\w*\s+(?:building|centre|center|complex|headquarters)|\b(?:town|city)\s+hall\b|\brathaus\b"
+                              r"|\bcorporate offices?\b")
+RC_RES_TWINS = frozenset({"apartments", "residential", "dormitory", "terrace", "semidetached_house"})
+RC_HOUSE_TWINS = frozenset({"house", "detached", "bungalow", "farm"})
+RC_HOUSE_MIN_STOREYS = 2
+RC_NONRES_TWINS = frozenset({
+    "office", "industrial", "warehouse", "school", "university", "college", "hospital", "hotel", "public", "government", "civic",
+    "kindergarten", "church", "chapel", "train_station", "sports_centre", "sports_hall", "fire_station", "manufacture", "hangar",
+    "service", "transportation"})
+RC_BOX_MIN_FOOTPRINT_M2 = 1000
+RC_BOX_MAX_STOREYS = 2
+
+# POI groups (the synthesis's poimap): an asked or sole POI's group comes from its poi_use, else
+# from the OSM key its use came from, else from the first key column it carries; "unmapped" if
+# none. The group sets its floor family and its POI-level class.
+POI_GROUPS = {
+    "small_retail": (
+        "bakery", "butcher", "kiosk", "convenience", "beverages", "florist", "optician", "hearing_aids", "chemist", "clothes", "shoes",
+        "jewelry", "jeweller", "gift", "books", "stationery", "toys", "cosmetics", "perfumery", "mobile_phone", "electronics", "computer",
+        "variety_store", "pet", "tobacco", "e-cigarette", "bag", "watches", "art", "music", "musical_instrument", "photo", "second_hand",
+        "charity", "deli", "confectionery", "pastry", "tea", "coffee", "wine", "alcohol", "greengrocer", "seafood", "cheese", "organic",
+        "health_food", "nutrition_supplements", "medical_supply", "bicycle", "sports", "outdoor", "interior_decoration", "houseware",
+        "kitchen", "fabric", "sewing", "wool", "frame", "lottery", "newsagent", "newspaper", "copyshop", "ticket", "pharmacy", "boutique",
+        "fashion_accessories", "erotic", "cannabis", "video_games", "antiques", "collector", "gold_buyer", "pawnbroker", "printer_ink",
+        "hifi", "souvenir", "nuts", "trophy", "wigs", "bed", "carpet", "lighting", "curtain", "window_blind", "tiles",
+        "bathroom_furnishing", "paint", "doors", "fireplace", "flooring", "shop", "retail", "grocery", "food", "ice_cream_shop", "farm",
+        "motorcycle_parts", "car_parts", "tyres", "hardware;toys", "tobacco;lottery", "gift;newsagent", "travel_agency;books", "model",
+        "handicraft", "fan", "ashtray", "elevator"),
+    "food_store": ("supermarket",),
+    "big_box": ("doityourself", "garden_centre", "furniture", "trade", "wholesale", "car", "motorcycle", "building_materials", "hardware"),
+    "department_store": ("department_store",),
+    "gastronomy": ("restaurant", "fast_food", "cafe", "pub", "bar", "ice_cream", "biergarten", "food_court", "hookah_lounge", "internet_cafe",
+                   "outdoor_seating", "caterer"),
+    "personal_service": ("hairdresser", "beauty", "massage", "tattoo", "piercing", "tailor", "dressmaker", "dry_cleaning", "laundry",
+                         "shoe_repair", "shoemaker", "key_cutter", "funeral_directors", "tanning_salon", "pet_grooming", "photographer",
+                         "photo_booth", "sharpening", "electronics_repair", "cleaning", "washing_machine", "clothes_dryer", "rental",
+                         "ski_rental", "storage_rental"),
+    "health_practice": ("doctors", "doctor", "physician", "dentist", "physiotherapist", "podiatrist", "podologist", "therapist",
+                        "psychotherapist", "alternative", "healer", "speech_therapist", "occupational_therapist", "midwife", "optometrist",
+                        "veterinary", "clinic", "blood_donation", "nursing_service", "healthcare", "laboratory", "lab"),
+    "counter": ("bank", "post_office", "travel_agency", "travel_agent", "insurance", "estate_agent", "letting_agency", "car_rental",
+                "employment_agency", "bureau_de_change", "money_transfer", "customer_care_center", "reception_desk", "bookmaker", "gambling",
+                "telecommunication", "energy_supplier"),
+    "office": ("office", "company", "it", "lawyer", "notary", "tax_advisor", "accountant", "consulting", "architect", "engineer", "surveyor",
+               "association", "ngo", "union", "foundation", "political_party", "politician", "advertising_agency", "marketing", "financial",
+               "financial_advisor", "coworking", "coworking_space", "property_management", "logistics", "cooperative", "religion",
+               "publisher", "translator", "design", "web_design", "linux", "event_management", "leasing", "security", "construction_company",
+               "moving_company", "energy", "technology", "coaching", "chamber", "administrative", "newspaper_office", "institute",
+               "research_office"),
+    "public_office": ("townhall", "government", "courthouse", "police", "public_building", "polling_station", "civic", "tax_office",
+                      "register_office"),
+    "childcare": ("kindergarten", "childcare"),
+    "school": ("school", "university", "college", "lecture_hall", "faculty", "research", "research_institute", "educational_institution",
+               "education", "institute"),
+    "small_school": ("driving_school", "music_school", "language_school", "dancing_school", "prep_school", "first_aid_school", "tutoring",
+                     "dojo", "martial_arts"),
+    "care_home": ("nursing_home", "assisted_living", "hospice", "social_facility"),
+    "hospital": ("hospital",),
+    "hotel": ("hotel", "motel", "hostel", "guest_house", "tourist_accommodation"),
+    "holiday_flat": ("apartment", "chalet", "room"),
+    "culture": ("museum", "theatre", "cinema", "arts_centre", "events_venue", "gallery", "library", "attraction", "castle", "planetarium",
+                "concert_hall", "exhibition_centre", "casino", "adult_gaming_centre", "amusement_arcade", "escape_game", "laser_tag",
+                "nightclub", "stage", "public_bookcase"),
+    "community": ("community_centre", "social_centre", "youth_centre", "club", "fraternity", "student_association", "scout", "youth",
+                  "culture", "social", "freemasonry", "parish_hall", "centre", "chess"),
+    "worship": ("place_of_worship", "christian", "church", "chapel", "monastery"),
+    "sport": ("sports_centre", "fitness_centre", "fitness", "sports_hall", "multi", "shooting", "equestrian", "horse_riding", "tennis",
+              "gymnastics", "swimming", "swimming_pool", "dance", "yoga", "sauna", "9pin", "10pin", "climbing", "soccer", "padel", "archery",
+              "athletics", "water_park", "indoor_play", "karting", "water_sports", "sport", "public_bath"),
+    "craft": ("plumber", "electrician", "carpenter", "roofer", "painter", "hvac", "metal_construction", "gardener", "stonemason", "glaziery",
+              "joiner", "upholsterer", "locksmith", "tiler", "builder", "window_construction", "sawmill", "brewery", "winery", "printer",
+              "signmaker", "pottery", "atelier", "sculptor", "bookbinder", "floorer", "beekeeper", "renovation", "craft", "electrical",
+              "pest_control"),
+    "vehicle": ("car_repair", "car_wash", "vehicle_inspection", "car_service", "abschlepp_und_pannendienst"),
+    "fuel": ("fuel",),
+    "industry": ("industrial", "works", "factory", "manufacture", "warehouse", "depot", "storage", "water_works", "wastewater_plant", "plant",
+                 "power", "cooling", "silo", "recycling", "greenhouse", "hall"),
+    "transport": ("station", "train_station", "bus_station", "terminal", "post_depot", "aerodrome", "hangar", "luggage_locker"),
+    "fire_rescue": ("fire_station", "ambulance_station", "rescue_station"),
+    "generic": ("commercial", "building", "public", "house", "historic", "villa", "heritage", "information", "access"),
+    "vacant": ("vacant", "ruins", "construction", "disused"),
+}
+POI_KEY_FALLBACK = {"shop": "small_retail", "office": "office", "craft": "craft", "healthcare": "health_practice"}
+# The POI-level class (a step-05 class name) per group, refined by use (the last matching
+# refinement wins; None refines every POI of the group not refined before) and for food stores
+# by brand. A POI unit takes the Workers factor of its own class (the user, 2026-10-05: FGSV
+# rates are per facility type, and a restaurant in a retail building is no shop); generic,
+# unmapped and vacant POIs, and the uses without a class, take the building's factor.
+POI_GROUP_CLASS = {
+    "small_retail": "retail (small-scale)", "department_store": "department stores", "gastronomy": "restaurants / gastronomy",
+    "personal_service": "customer-oriented services", "health_practice": "customer-oriented services",
+    "counter": "customer-oriented services", "office": "normal office", "public_office": "normal office", "childcare": "kindergartens",
+    "small_school": "customer-oriented services", "care_home": "nursing homes", "hospital": "hospitals", "hotel": "hotels",
+    "holiday_flat": "hotels", "culture": "entertainment, culture", "community": "entertainment, culture",
+    "worship": "entertainment, culture", "sport": "fitness / wellness", "craft": "craft businesses",
+    "vehicle": "vehicle / electrical repair", "fuel": "retail (small-scale)", "transport": "Transport", "fire_rescue": "Public facilities",
+}
+POI_CLASS_BY_USE = (
+    ("office", ("lawyer", "notary", "tax_advisor", "accountant", "advertising_agency", "consulting", "architect", "engineer", "surveyor",
+                "financial_advisor", "marketing"), "business-oriented services"),
+    ("school", ("school",), "schools"),
+    ("school", ("university", "college", "lecture_hall", "faculty", "educational_institution", "education"), "universities"),
+    ("school", ("research", "research_institute"), "research institutes"),
+    ("culture", ("cinema",), "large cinemas"),
+    ("culture", ("nightclub",), "large discos, fun / leisure pools"),
+    ("sport", ("water_park",), "large discos, fun / leisure pools"),
+    ("big_box", ("doityourself", "hardware", "building_materials", "garden_centre"), "DIY stores"),
+    ("big_box", ("furniture",), "furniture stores"),
+    ("big_box", ("trade", "wholesale"), "wholesale"),
+    ("big_box", ("car", "motorcycle"), "car dealerships"),
+    ("industry", ("warehouse", "depot", "storage"), "Yards, depots, storage areas, construction yards"),
+    ("industry", None, "Industrial operations / Production"),
+)
+POI_FOOD_STORE_CLASS = "retail (small-scale)"
+POI_DISCOUNT_CLASS = "discount stores"
+POI_DISCOUNT_PATTERN = r"\b(?:aldi|lidl|netto|penny|norma|np[- ]?markt|np\b)"
+POI_HYPER_CLASS = "hypermarkets / superstores"
+POI_HYPER_PATTERN = r"\b(?:kaufland|marktkauf|globus|e[- ]?center|real\b|famila|v-markt|toom markt|hit\b)"
+
+# Building units - the building is the sole occupant (no asked POIs): the storeys it takes,
+# per class, (with dwellings, without dwellings, condition); None = every storey (ALL); a class
+# not listed takes every storey. Where a condition is given it must hold, or the occupant takes
+# every storey: not_office_building - the head names no whole office building / headquarters /
+# administration; public_office - a parish, social or counselling office, not a care home;
+# small_school - a driving, music, language, dance or tutoring school; small_unit - a club room,
+# youth centre, arcade, gallery; small_unit_upstairs - the same in a building of 2+ storeys;
+# studio - a gym, dance, yoga or martial-arts studio, not a sports hall or pool (a parking
+# building counts as dwellings for it); holiday_flat - its only POI is a holiday flat and the
+# ALKIS code is residential; small_attraction - a trampoline or adventure hall, tent or kiosk.
+# The user's decisions (2026-10-05): shops and restaurants take one storey with AND without
+# dwellings (two only by a level tag over 0;1 or for a multi-level chain without dwellings);
+# Kitas 1 / 2; department stores 2 with dwellings; outlets 2; the rest from the synthesis.
+UNIT_CLASS_STOREYS = {
+    "retail (small-scale)":                       (1, 1, None),
+    "Retail":                                     (1, 1, None),
+    "restaurants / gastronomy":                   (1, 1, None),
+    "customer-oriented services":                 (1, None, None),
+    "customer service":                           (1, None, None),
+    "business-oriented services":                 (1, None, "not_office_building"),
+    "normal office":                              (1, None, "not_office_building"),
+    "Services":                                   (1, None, None),
+    "Public facilities":                          (1, None, "public_office"),
+    "schools":                                    (1, None, "small_school"),
+    "kindergartens":                              (1, 2, None),
+    "Crafts and trades":                          (1, 1, None),
+    "craft businesses":                           (1, 1, None),
+    "entertainment, culture":                     (1, None, "small_unit"),
+    "Facilities for culture, leisure and sports": (1, None, "small_unit_upstairs"),
+    "fitness / wellness":                         (1, 2, "studio"),
+    "large cinemas":                              (1, None, None),
+    "hotels":                                     (1, 1, "holiday_flat"),
+    "department stores":                          (2, None, None),
+    "factory outlet centers":                     (2, 2, None),
+    "theme parks":                                (1, 1, "small_attraction"),
+}
+# In these street-level classes the building's only POI refines the class rule by its group
+# (with dwellings, without, condition). Banks, insurers, the employment agency, energy suppliers
+# and customer-care centres take one storey with dwellings and every storey without
+# (UNIT_COUNTER_ALL_USES); a holiday flat reads the ALKIS code (condition dwelling_by_code).
+UNIT_STREET_CLASSES = frozenset({
+    "retail (small-scale)", "Retail", "restaurants / gastronomy", "customer-oriented services", "customer service",
+    "business-oriented services", "Services", "normal office"})
+UNIT_GROUP_STOREYS = {
+    "food_store":       (1, 1, None),
+    "vehicle":          (1, 1, None),
+    "fuel":             (1, 1, None),
+    "big_box":          (1, 1, None),
+    "craft":            (1, 1, None),
+    "small_retail":     (1, 1, None),
+    "gastronomy":       (1, 1, None),
+    "personal_service": (1, 1, None),
+    "counter":          (1, 1, None),
+    "health_practice":  (1, None, "not_office_building"),
+    "office":           (1, None, "not_office_building"),
+    "public_office":    (1, None, "not_office_building"),
+    "small_school":     (1, None, "not_office_building"),
+    "holiday_flat":     (1, 1, "dwelling_by_code"),
+    "sport":            (1, 2, None),
+    "community":        (1, None, None),
+    "childcare":        (1, 2, None),
+    "department_store": (2, None, None),
+}
+UNIT_COUNTER_ALL_USES = frozenset({"bank", "insurance", "employment_agency", "energy_supplier", "customer_care_center"})
+# A level tag of the only POI moves these: a tag over n floors (0;1) gives n storeys, a level of
+# 1 or more one storey; a multi-level chain without dwellings two.
+UNIT_LEVEL_TAG_CLASSES = frozenset({"retail (small-scale)", "Retail", "restaurants / gastronomy"})
+UNIT_LEVEL_TAG_GROUPS = frozenset({"small_retail", "gastronomy", "personal_service", "counter"})
+# Plain homes without POI (about 300, most of them kept only because a commercial or industrial
+# site polygon covers them) keep one storey WITH their labels (the user, 2026-10-05). The floors
+# above are flats: no remainder.
+UNIT_HOME_STOREYS = {"Services": 1}
+# The chains that carry a multi-level OSM level tag somewhere in our data (step-01 POIs): a
+# branch of one of them takes two floors without dwellings (LOW2 in a shared building), matched
+# on the POI's name or brand. Evidence: H&M node/878597604 and node/2138945738 level 0;1 (7 H&M
+# POIs); Zara node/6849243002 0;1; MediaMarkt node/2069302320 0;1 (8 POIs); Deichmann
+# node/3038616990 0;1 (13 POIs); Buchhandlung Graff node/3069698623 0;1;2; Roller way/74177990 0;1
+# (2 POIs). Not chains, their own tag counts anyway: Freise & Heidemann (bicycles), Meine
+# Kueche + Raeume, Afghan Warehouse (a department store), four restaurants and a pub, the hotel
+# Brusttuch, ver.di.
+MULTI_LEVEL_CHAINS = {
+    "H&M":                r"^H\s?&\s?M\b",
+    "Zara":               r"^Zara\b",
+    "MediaMarkt":         r"^Media\s?Markt\b",
+    "Deichmann":          r"^Deichmann\b",
+    "Buchhandlung Graff": r"^Buchhandlung Graff\b",
+    "Roller":             r"^Roller$",
+}
+
+# POI units in a shared building: the floor family of each asked POI, from its own group,
+# (with dwellings, without). GROUND = a share of the ground floor (all GROUND units together, with
+# half of each LOW2 and a third of each CAP3, at most one footprint); ONE = one storey anywhere;
+# LOW2 = ground and first floor; CAP2 / CAP3 = at most 2 / 3 storeys; ALL = what the others
+# leave, by share, even above its old share. Each unit keeps min(share x FA, its storeys x A).
+# The user's changes (2026-10-05): shops GROUND with and without dwellings (LOW2 for a multi-level
+# chain without dwellings); generic and unmapped POIs never ALL (the unmapped MobiVersum
+# playground took 36,443 m2); holiday flats and dormitories give no unit (they keep their floor).
+# Exceptions: in a mall the shops, restaurants, services and unmapped units take ALL (their share
+# of the capped mall); a big box in a big-box building ALL; museums, theatres ... (POI_CULTURE_
+# ALL_USES) ALL and a cinema CAP2; worship ALL in a worship building; a level tag moves a unit
+# up only - level 1 or more -> ONE, 0;1 -> LOW2, 0;1;2 -> CAP3.
+POI_GROUP_FAMILY = {
+    "small_retail":     ("GROUND", "GROUND"),
+    "food_store":       ("GROUND", "GROUND"),
+    "big_box":          ("GROUND", "GROUND"),
+    "department_store": ("LOW2", "ALL"),
+    "gastronomy":       ("GROUND", "GROUND"),
+    "personal_service": ("GROUND", "GROUND"),
+    "counter":          ("GROUND", "GROUND"),
+    "vehicle":          ("GROUND", "GROUND"),
+    "fuel":             ("GROUND", "GROUND"),
+    "craft":            ("GROUND", "GROUND"),
+    "childcare":        ("GROUND", "GROUND"),
+    "health_practice":  ("ONE", "ONE"),
+    "small_school":     ("ONE", "ONE"),
+    "community":        ("ONE", "ONE"),
+    "sport":            ("ONE", "ONE"),
+    "office":           ("ONE", "ALL"),
+    "public_office":    ("ONE", "ALL"),
+    "school":           ("ALL", "ALL"),
+    "care_home":        ("ALL", "ALL"),
+    "hospital":         ("ALL", "ALL"),
+    "hotel":            ("ALL", "ALL"),
+    "industry":         ("ALL", "ALL"),
+    "transport":        ("ALL", "ALL"),
+    "fire_rescue":      ("ALL", "ALL"),
+    "culture":          ("ONE", "ONE"),
+    "worship":          ("ONE", "ONE"),
+    "holiday_flat":     ("ONE", "ALL"),
+    "generic":          ("GROUND", "ONE"),
+    "unmapped":         ("GROUND", "ONE"),
+    "vacant":           ("GROUND", "ONE"),
+}
+POI_MALL_CLASSES = frozenset({"shopping centers", "factory outlet centers"})
+POI_MALL_UNIT_GROUPS = frozenset({"small_retail", "gastronomy", "personal_service", "counter", "food_store", "big_box", "culture",
+                                  "department_store", "generic", "unmapped"})
+POI_BIGBOX_CLASSES = frozenset({"hypermarkets / superstores", "furniture stores", "DIY stores", "wholesale", "car dealerships",
+                                "discount stores", "self-service department stores"})
+POI_CULTURE_ALL_USES = frozenset({"museum", "theatre", "castle", "attraction", "events_venue", "concert_hall", "exhibition_centre",
+                                  "planetarium"})
+POI_CHAIN_GROUPS = frozenset({"small_retail", "big_box"})
+# One facility (stress-test fix): where all active asked POIs of a building are in one group -
+# two or more of them, or a single one whose POI-level class is the building's class (the
+# reading taken of "all in one group, or that group is the building's own class"; 868
+# buildings, 100 of them with a single POI) - they share the building's sole-occupant floor
+# (the building-unit rules above) by their shares, instead of being tenants (Kita
+# Abenteuerland: two kindergarten nodes kept only the ground floor; the TU Mensa). Not where a
+# vacant, holiday-flat or dormitory place shares the building.
+# Holiday flats and student dormitories are dwellings (the user, 2026-10-05): such a POI gives no
+# unit, and keeps its floor so that the other tenants do not grow into it.
+POI_NO_UNIT_GROUPS = frozenset({"holiday_flat"})
+POI_DORM_USES = frozenset({"student_accommodation", "student_accomodation", "dormitory"})
+# Landuse pairs (the user, 2026-10-05, reversing the 2026-10-01/02 rule): a landuse polygon
+# (landuse=commercial / retail / industrial, 180 pairs) is no tenant, so the shares are re-split
+# over the asked POIs - in run 1 it held 99.9 % of the Ring-Center and over half of 126 other
+# buildings. A non-asked vacant pair keeps its share as an empty GROUND slot that carries
+# nothing and never becomes a remainder.
+REDIST_LANDUSE_USES = frozenset({"commercial", "retail", "industrial"})
+# The point size cap (the user, 2026-10-05; widened 2026-10-06): a POI mapped as a point (not a building
+# unit) in a shared building takes at most the 90th percentile of the mapped polygons of its group - own POI
+# polygons smaller than 0.8 of their building's footprint, so not the outline itself - and is never the
+# building's main occupant: it keeps min(share x floor area, its cap), the cap applied before the ground-floor
+# budget. Every group has a cap (2026-10-06): its own p90 where it has at least POINT_SIZE_CAP_MIN_POLYGONS
+# polygons, else the p90 of all groups' polygons (POINT_SIZE_CAP_DEFAULT_M2: department stores, transport); the
+# five street-level caps and the office / community / small-school caps are the numbers the user decided on
+# (small_school rests on 5 polygons). An anchor (POI_ANCHOR_GROUPS, below) is not capped. The freed floor goes
+# to the main occupants; with none it stays free - a remainder without dwellings, nothing with them. Before
+# 2026-10-06 a fuel point took 14,172 m2 of VW Halle 52 and a historic well point carried St. Aegidien's
+# Workers. Recomputed on the step-06 / step-01 data of 2026-10-05 (the notebook checks every number): group
+# cap m2 (polygons).
+POINT_SIZE_CAP_QUANTILE = 0.9
+POINT_SIZE_CAP_OUTLINE_SHARE = 0.8
+POINT_SIZE_CAP_MIN_POLYGONS = 10
+POINT_SIZE_CAP_DEFAULT_M2 = 1345.6              # all groups, 1,586 polygons
+POINT_SIZE_CAP_M2 = {
+    "gastronomy":       438,                    # 137 polygons
+    "small_retail":     748,                    # 298
+    "personal_service": 187,                    # 38
+    "counter":          388,                    # 33
+    "health_practice":  319,                    # 30
+    "office":           1540,                   # 52
+    "community":        779,                    # 37
+    "small_school":     692,                    # 5
+    "big_box":          4773.5,                 # 35
+    "care_home":        1510.1,                 # 25
+    "childcare":        454.3,                  # 29
+    "craft":            278.1,                  # 21
+    "culture":          1112.2,                 # 30
+    "fire_rescue":      444.4,                  # 24
+    "food_store":       1770.8,                 # 25
+    "fuel":             180.9,                  # 12
+    "generic":          2459.6,                 # 62
+    "hospital":         2053.0,                 # 20
+    "hotel":            465.9,                  # 42
+    "industry":         12073.9,                # 168
+    "public_office":    958.5,                  # 39
+    "school":           2208.6,                 # 145
+    "sport":            1530.9,                 # 122
+    "unmapped":         1267.4,                 # 34
+    "vehicle":          491.8,                  # 30
+    "worship":          748.7,                  # 51
+}
+# Anchors (the user, 2026-10-06): a food store or big box in its own big-box building (a POI_BIGBOX_CLASSES
+# building: Globus, Kaufland) is the building's main occupant - floor family ALL, no point cap - and so is a
+# point whose family is ALL anyway and whose POI-level class is the building's class (a school in a school, a
+# hotel in a hotel: the reading taken so that the point cap does not cut such a building to a point's size).
+# Before 2026-10-06 the Globus point kept 3,606 of its own 18,030 m2.
+POI_ANCHOR_GROUPS = frozenset({"food_store", "big_box"})
+# Non-occupants (stress-test fix, put behind this switch - the user has not seen it explicitly):
+# amenity features asked as POIs give no unit and their host keeps the floor; decided by TAG,
+# not by poi_use, so that kitchen shops (shop=kitchen) and staffed tourist offices
+# (tourism=information with information=office, or a step-07 type naming an office, centre,
+# desk ...) stay; an "information point" names no staff (the three gates of the VW KundenCenter,
+# no information tag) and is dropped; a POI that also carries an occupant key (a chemist with
+# amenity=post_box) stays. A building label only a dropped POI carried becomes a rest unit; a
+# building left with no asked POI is a building unit.
+REDIST_DROP_NON_OCCUPANTS = True
+NON_OCCUPANT_TAGS = {
+    "amenity": frozenset({"shower", "public_bookcase", "kitchen", "photo_booth", "luggage_locker", "luggage_lockers", "bleachers",
+                          "give_box", "washing_machine", "dressing_room", "post_box", "clothes_dryer", "vending_machine", "toilets",
+                          "drinking_water", "atm", "reception_desk"}),
+    "leisure": frozenset({"bleachers"}),
+    "shop":    frozenset({"vending_machine"}),
+}
+NON_OCCUPANT_KEEP_KEYS = ("shop", "office", "craft", "healthcare")
+NON_OCCUPANT_INFO_STAFFED_PATTERN = r"\b(?:office|cent(?:re|er)|desk|reception|service|counter|bureau|shop|store|kiosk)\b"
+
+# Rules on single categories and places without a unit (the user, 2026-10-05, adapted from the
+# colleague's Stage 6 / 8):
+#   * churches (ALKIS 3041 / 3043 / 3045; 868 zoned): Workers 0 on the church's building and
+#     rest units and on its worship POI units - a class rate on a nave is an artefact, the few
+#     staff are part-time; other tenants keep their Workers, every non-work label stays;
+#   * volunteer fire stations (a fire-station head, inside or outside the cities; never a
+#     professional, works or FTZ station - read in the whole type and the name, so "Fire station
+#     (Feuerwehrtechnische Zentrale)" and "(county technical centre)" are none - and never an
+#     office, a museum or a former station now used otherwise - read in the head and the name, so
+#     "Volunteer fire station with municipal office" is one): Workers 0 on the building, rest and
+#     fire-station POI units; a station labelled only work gets no unit. "Inside or outside the
+#     cities" is read as: Braunschweig, Salzgitter and Wolfsburg have professional brigades, so a
+#     station there counts only where its head says volunteer (the colleague's translation; 523
+#     stations - read without it, 631: 108 more in the three cities);
+#   * sports halls and clubhouses (ALKIS 3200 / 3211, or a sports-hall head - a clubhouse without
+#     those codes is not one - in the club-type classes): Workers 0 on the building and rest units
+#     and on the POI units that are the hall, its club or the school using it (the sport,
+#     community, school, generic and unmapped groups - "Sporthalle" DENIAL8400004shp, the
+#     colleague's example, held 138 Workers on its sport POIs); School and the other labels stay;
+#     staffed venues keep their Workers, as buildings and as POIs - pools, ice arenas, clinics,
+#     hotels, offices, nursing homes, commercial play venues (Monkey Town, Hally Gally), public
+#     greenhouses - and so do the other tenants (restaurants, shops, practices, offices);
+#   * the no-evidence residential buildings (the colleague's 6.1: ALKIS 31001_1xxx, class normal
+#     office / Services / retail (small-scale) / customer-oriented services, no POI, no site, no
+#     name; 1,752 zoned + 10 unzoned): one unit at footprint x 1 with Workers only - the labels
+#     came from the cadastre code alone; the 51 with a retail / commercial OSM twin keep their
+#     labels on footprint x 1;
+#   * holiday flats (the colleague's 6.2: class hotels, ALKIS 31001_1xxx, own POIs only holiday
+#     flats and chalets, 384, 352 in Goslar district): no unit at all, like dwellings;
+#   * dormitories (a dormitory head, and student-accommodation POIs): no unit; other tenants keep
+#     theirs;
+#   * the last-carrier guard: where one of these rules (or a no-unit rule) leaves a zone with a
+#     target but no carrier of a category, the units the rule removed there keep that category at
+#     their weight before the rule (zone 315700615: a chapel and a fire station carry its 682
+#     Workers). Not for the label mapping: zones that lost their only Retail_Daily carrier with
+#     errands use the ring fallback.
+CHURCH_ALKIS_CODES = frozenset({3041, 3043, 3045})
+CHURCH_POI_USES = frozenset({"place_of_worship", "christian", "church"})
+# and, as for sports halls, the POI units of a church without a type - a historic well point carried 17 Workers in St.
+# Aegidien (2026-10-06); a parish hall (community) keeps its Workers
+CHURCH_POI_GROUPS = frozenset({"generic", "unmapped"})
+VOLUNTEER_FIRE_PATTERN = r"\bfire[- ]?(?:station|brigade|department|house)|\bfire and rescue|\bfeuerwehr|\bfeuerwache|\bortswehr"
+VOLUNTEER_FIRE_EXCLUDE_PATTERN = (r"\bprofessional|berufsfeuerwehr|\bcompany\b|\bplant\b|\bfactory\b|in-house|werkfeuerwehr|industrial site"
+                                  r"|volkswagen|technische zentrale|\bftz\b|feuerwehrtechnisch|technical cent(?:re|er)")
+VOLUNTEER_FIRE_EXCLUDE_HEAD_PATTERN = r"\bformer\b|ehemalig|\boffices?\b|administrat|museum"
+VOLUNTEER_FIRE_CITY_PATTERN = r"\bvolunteer|\bvoluntary|freiwillig|ortsfeuerwehr|\bortswehr"
+VOLUNTEER_FIRE_CITY_AGS = ("03101", "03102", "03103")   # Braunschweig, Salzgitter, Wolfsburg: professional brigades
+VOLUNTEER_FIRE_POI_USES = frozenset({"fire_station"})
+SPORTS_HALL_ALKIS_CODES = frozenset({3200, 3211})
+SPORTS_HALL_TYPE_PATTERN = (r"\bsports? halls?\b|\bgym(?:nastics)? halls?\b|\bturnhalle|\bsporthalle|\bmulti[- ]purpose (?:sports )?hall"
+                            r"|\bmehrzweckhalle|\btennis ?halls?\b|tennishalle|\briding (?:hall|arena)|\bindoor riding|reithalle"
+                            r"|\b(?:school|primary school) gymnasium|\bshooting (?:sports )?halls?\b|schie(?:ss|ß)halle")
+SPORTS_HALL_CLASSES = frozenset({"Facilities for culture, leisure and sports", "schools", "entertainment, culture", "Transport"})
+SPORTS_HALL_KEEP_PATTERN = (r"\bpools?\b|swimming|\bbaths?\b|hallenbad|freibad|\btherm|\bice\b|eissport|eishalle|eisstadion|\bindoor play"
+                            r"|play ?(?:centre|center|ground|hall|park|land)|spielparadies|trampolin|\bfun ?(?:centre|center|park)"
+                            r"|greenhouse|glasshouse|palm house|tropical|\bclinic|klinik|sanatori|\bhotel|nursing|care home|\bpflege|\boffices?\b"
+                            r"|\bzoo\b|tierpark|wildpark|arche noah|camp(?:ing)?\s*site|campingplatz|\bmarina\b|yacht ?hafen|sportboothafen")
+SPORTS_HALL_KEEP_IDS = frozenset({"DENIAL010000ek41", "DENIAL050000bcvJ"})   # Monkey Town, Hally Gally
+# the POI units of a sports hall that get Workers 0, unless the keep pattern matches the POI's use, name or the head of its type
+SPORTS_HALL_POI_GROUPS = frozenset({"sport", "community", "school", "generic", "unmapped"})
+NO_EVIDENCE_FUNCTION_PREFIX = "31001_1"
+NO_EVIDENCE_CLASSES = frozenset({"normal office", "Services", "retail (small-scale)", "customer-oriented services"})
+NO_EVIDENCE_KEEP_TWINS = frozenset({"retail", "commercial"})
+HOLIDAY_FLAT_CLASS = "hotels"
+HOLIDAY_FLAT_FUNCTION_PREFIX = "31001_1"
+HOLIDAY_FLAT_USES = frozenset({"apartment", "chalet"})
+REDIST_LAST_CARRIER_GUARD = True
+
+# --- The five labels without a zone total: visitors per working day (the user, 2026-10-05/06) ---------------
+# value = the label's area (O / k_all) x a visitor rate / 100, never redistributed. A rate is visitor
+# ARRIVALS - persons, all modes, staff excluded - per 100 m2 of occupied floor area per average working day
+# (Mon-Fri): the day every source counts (FGSV 147, Bosserhoff / Ver_Bau, ITE, TRICS) and German VISUM demand
+# models usually run. FGSV "Wege" at the site = 2 x arrivals (Bosserhoff 2011: 2.0 Wege per visitor).
+# Persons whose purpose is a redistributed label (pupils, students, Kita children) are left out. The table
+# was researched and checked on 2026-10-05 (Bosserhoff, FGSV and Ver_Bau rows as quoted in planning studies;
+# KBV, the hairdressers' association, TRICS, ITE, the Berlin music-school standard, church attendance) and
+# agreed by the user on 2026-10-06: the middle value is used (VISITOR_RATE_SCENARIO; low and high are kept
+# for sensitivity runs); where no published rate exists our chosen number is used and marked assumed - the
+# output names the labels whose value rests on such a number, so that it can be replaced. Decided with it:
+#   * restaurants and cafes that also carry leisure get no meetup value (their guests are in the Leisure
+#     total); hotels no business value; fuel stations 0 (refuelling stops lie on the way); plain homes no
+#     meetup; event venues a low rate (used now and then); company academies 0 (the trainees are Workers);
+#     lessons anywhere in a school or university building 0 (the pupils and students are in those totals);
+#   * staff canteens and occupational-health offices on company sites carry none of the five labels
+#     (their users are the Workers of the site);
+#   * pharmacies and post offices give a value per outlet instead of per m2 (VISITOR_PER_OUTLET);
+#   * a small-format rate (practice, counter, hairdresser, shop, cafe ...) applies only up to its group's
+#     point size cap - the rest of a larger unit gets the unit's class rate (a 27,445 m2 hospital typed as
+#     a medical centre no longer gets 6,861 patients a day).
+# Rate id -> (low, mid, high, assumed, source). B_ business, E_ errands, S_ sports, M_ meetup, L_ lessons.
+# The business rates and the generic errands rates are an employee density (BOSSERHOF_WEIGHTS, the FGSV
+# ranges) x visitors per employee: office 0.25 / 0.5 / 1.0 (FGSV office 0.5-1.0 Wege, Ver_Bau 0.5-2.0),
+# industry 0 / 0.25 / 0.5 (FGSV commercial areas 0.5-1 Wege), craft 0.25 / 0.5 / 0.75 (Freudl 2025 0.25;
+# the Bosserhoff 2001 residual of 0.75 also holds the staff's own trips to clients), generic 0.25 / 1.25 /
+# 5.0 (the 1.25 assumed: half the FGSV lower bound of 5 Wege for public-facing services).
+VISITOR_RATE_SCENARIO = "mid"                   # "low" / "mid" / "high"
+VISITOR_RATE_ANCHORS = {
+    "ZERO":         (0, 0, 0, False, "a decided zero (the reason is written with the value)"),
+    # errands
+    "E_PRACTICE":   (15, 24, 50, False, "Heft 42 era 7.5-12.5 patients per employee x 2-4 employees per 100 m2 (VKT 2014); KBV 2026: 7.7-8.3 contacts per staff-day"),
+    "E_COUNTER":    (5, 12, 30, True, "FGSV 147 Tab. 3.9 public-facing services 5-50 visitor Wege per employee x 2-4 employees; the 12 is our pick"),
+    "E_PERSONAL":   (5, 9, 15, True, "hairdressers' association 2026: 80,118 salons, 7.7 bn EUR, 235,000 staff; 30-50 EUR per visit assumed"),
+    "E_PUBOFF":     (1, 3, 7, True, "normal-office density x 1 visitor per employee, assumed; Itzehoe (Ver_Bau 2023) 0.3-0.4 per employee as the low"),
+    "E_HOSPITAL":   (0.4, 1.0, 2.0, False, "Landsberg hospital 2024 operator data: outpatients and admissions per day against staff present"),
+    "E_SOCIAL":     (1, 2, 5, True, "social facilities and counselling: no source; about the nursing-home visitor rate"),
+    "E_VEHICLE":    (0.425, 1.25, 2.475, False, "vehicle-repair density 1.7 / 2.5 / 3.3 x craft visitors per employee"),
+    "E_CRAFT":      (0.325, 0.95, 1.875, False, "craft density 1.3 / 1.9 / 2.5 x craft visitors per employee"),
+    "E_FUEL":       (0, 0, 0, False, "the user: 0 - refuelling stops are on the way (JET's about 900 customers per station-day are pass-by)"),
+    "E_LIBRARY":    (10, 40, 100, False, "Ver_Bau 12/2022 library 0.1-1.0 customers per m2 gross floor area, 0.40 chosen (Obertshausen 2023)"),
+    "E_TRANSPORT":  (0, 0.125, 0.25, False, "Transport density 0.5 x industry visitors per employee"),
+    "E_PARKING":    (0, 0, 0, False, "parking: the errands happen at the places people walk to"),
+    "E_GEN_COS":    (0.5, 3.75, 20, True, "customer-oriented services density 2.0 / 3.0 / 4.0 x generic visitors per employee"),
+    "E_GEN_SERVICES": (0.5, 2.95, 16.5, True, "Services density 2.0 / 2.36 / 3.3 x generic visitors per employee"),
+    "E_GEN_RETAIL": (0.5, 4.375, 25, True, "small-scale retail density 2.0 / 3.5 / 5.0 x generic visitors per employee"),
+    # business
+    "B_OFFICE":     (0.625, 1.45, 3.3, False, "normal office 2.5 / 2.9 / 3.3 x office visitors per employee (FGSV 147 2006, Ver_Bau)"),
+    "B_OPEN_PLAN":  (0.825, 2.075, 5.0, False, "open-plan office 3.3 / 4.15 / 5.0 x office"),
+    "B_BOS":        (0.5, 1.75, 5.0, False, "business-oriented services 2.0 / 3.5 / 5.0 x office"),
+    "B_COS":        (0.5, 1.5, 4.0, False, "customer-oriented services 2.0 / 3.0 / 4.0 x office"),
+    "B_SERVICES":   (0.5, 1.18, 3.3, False, "Services 2.0 / 2.36 / 3.3 x office"),
+    "B_RESEARCH":   (0.25, 0.625, 1.5, False, "research institutes 1.0 / 1.25 / 1.5 x office"),
+    "B_PUBLIC":     (0.235, 0.65, 1.68, False, "Public facilities 0.94 / 1.30 / 1.68 x office"),
+    "B_CUSTOMER_SERVICE": (0.825, 1.65, 3.3, False, "customer service 3.3 x office"),
+    "B_CULTURE":    (0.4175, 0.835, 1.67, False, "entertainment, culture 1.67 x office"),
+    "B_RETAIL":     (0.5, 1.75, 5.0, False, "small-scale retail 2.0 / 3.5 / 5.0 x office"),
+    "B_HOSPITAL":   (0.25, 0.625, 1.5, False, "hospitals 1.0 / 1.25 / 1.5 x office"),
+    "B_INDUSTRY":   (0, 0.3375, 0.75, False, "Industrial operations 1.2 / 1.35 / 1.5 x industry"),
+    "B_HIGHLY_PRODUCTIVE": (0, 0.2125, 0.5, False, "highly productive industries 0.7 / 0.85 / 1.0 x industry"),
+    "B_YARDS":      (0, 0.2125, 0.5, False, "yards, depots, storage 0.7 / 0.85 / 1.0 x industry"),
+    "B_TRANSPORT":  (0, 0.125, 0.25, False, "Transport 0.5 x industry"),
+    "B_WHOLESALE":  (0, 0.6125, 1.45, False, "wholesale 2.0 / 2.45 / 2.9 x industry"),
+    "B_CRAFT":      (0.325, 0.95, 1.875, False, "craft businesses 1.3 / 1.9 / 2.5 x craft"),
+    "B_VEHICLE":    (0.425, 1.25, 2.475, False, "vehicle / electrical repair 1.7 / 2.5 / 3.3 x craft"),
+    # sports
+    "S_FITNESS":    (15, 22.5, 30, False, "fitness 0.15-0.30 visitors per m2 gross floor area (VKT Usingen 2014, Ver_Bau); ITE 492 18-22.5"),
+    "S_HALL":       (6.9, 9.4, 16.9, False, "club use of a single hall: 30.6 h a week x 20 persons x 0.9 (BISp planning parameters, Karlsruhe 2024) on 650-810 m2"),
+    "S_POOL":       (10, 12.5, 15, False, "indoor pools 10-15 visitors per 100 m2 gross floor area (HSVV guidance, Oberschleissheim 2015)"),
+    "S_ENT":        (10, 20, 30, False, "FGSV 147 Bild 3.11 entertainment 10-30 visitors per 100 m2 gross floor area"),
+    "S_TENNIS":     (2.1, 4.5, 5.7, True, "an indoor court: 105 h a week x 85 % x 3 persons on 670 m2 (BISp planning norm, not a count)"),
+    "S_RIDING":     (1, 2, 4, True, "no source: 15-30 riders a day plus stable visitors in a riding hall of about 1,200 m2"),
+    "S_SHOOT":      (1, 3, 6, True, "no source: 2-3 club evenings a week with 15-40 shooters in about 300 m2"),
+    "S_CLUB":       (10, 19, 29, True, "the users of a club's outdoor pitch on its clubhouse: 30 persons x 9.4-20.2 h a week (BISp), 1.5-2 h per visit assumed"),
+    # meetup
+    "M_CARE":       (0.5, 1.0, 2.5, False, "visitors of residents: 60 a day on 6,400 m2 (IKS Kassel 2018), 0.5 visitors per resident"),
+    "M_WORSHIP":    (0.1, 0.3, 1.0, True, "a working day in a church, assumed; the 7-day mean of Sunday attendance (EKD 2024) is about 1.0"),
+    "M_GASTRO":     (20, 43, 75, False, "Ver_Bau gastronomy 30-60 guest Wege per employee / 2 x 1.3-2.5 employees per 100 m2 (Ramboll 2024)"),
+    "M_COMMUNITY":  (5, 10, 15, False, "TRICS 07/Q community centres: 6.08 vehicle arrivals per 100 m2 on weekdays x 1.8-2.5 persons, staff deducted"),
+    "M_CULTURE":    (10, 20, 40, False, "theatre and cinema 20 persons per 100 m2 gross floor area (Ver_Bau, Ramboll 2024)"),
+    "M_EVENTS":     (2, 5, 10, True, "event venues and centres used now and then: a quarter of the theatre rate, assumed"),
+    "M_ASSOC":      (1.5, 5, 10, True, "associations, parties, parish offices: between the office business rate and the community-centre rate, assumed"),
+    "M_HOSPVISIT":  (0.2, 0.4, 1.0, False, "visitors of inpatients: 0.5 per inpatient-day (Landsberg 2024)"),
+    "M_PRISON":     (0.1, 0.2, 0.5, True, "inmate visitors: no source"),
+    # lessons
+    "L_SMALL":      (6, 9, 25, False, "Berlin music-school space standard: 5,238 pupils on 12,113 m2 gross, one lesson a week"),
+    "L_DANCE":      (10, 20, 40, True, "a course room of 50 m2 with 12 persons x 3 sessions a day (Berlin standard) at half use, assumed"),
+    "L_EDU":        (2.0, 3.3, 4.6, True, "learners per 100 m2 of school-labelled area in our data (VISUM pupils and students) x an attendance factor, assumed"),
+    "L_FIRE":       (0.5, 1, 2, True, "volunteer fire, THW, DRK and DLRG training: one evening a week with 20-30 members, assumed"),
+}
+# Per outlet (errands; the value is split over the unit's non-work labels like an area): customers per
+# working day of one outlet, whatever its floor area.
+VISITOR_PER_OUTLET = {
+    "pharmacy":    (170, 340, 340, False, "Ver_Bau 2012 input (Oberschleissheim 2015 Tab. 2): 5.0 customers per m2 of sales area, 339 for 68 m2"),
+    "post_office": (45, 90, 90, True, "DHL 2026: about 2 M customers a day at about 22,400 outlets - seen in a search summary only"),
+}
+# The lookup (lib/floor_rules.visitor_rate_id): a POI unit by its own group and use, a building unit by its
+# only POI's, then by the building's class (CMP: by the building's type words), else the label's default.
+VISITOR_GROUP_RATES = {
+    "errands": {"health_practice": "E_PRACTICE", "counter": "E_COUNTER", "personal_service": "E_PERSONAL",
+                "public_office": "E_PUBOFF", "hospital": "E_HOSPITAL", "care_home": "E_SOCIAL", "vehicle": "E_VEHICLE",
+                "fuel": "E_FUEL", "craft": "E_CRAFT", "transport": "E_TRANSPORT"},
+    "meetup":  {"care_home": "M_CARE", "worship": "M_WORSHIP", "gastronomy": "M_GASTRO", "community": "M_COMMUNITY",
+                "culture": "M_CULTURE", "office": "M_ASSOC", "public_office": "M_ASSOC", "sport": "M_COMMUNITY",
+                "hospital": "M_HOSPVISIT", "fire_rescue": "M_ASSOC"},
+    "lessons": {"school": "L_EDU", "fire_rescue": "L_FIRE", "community": "M_COMMUNITY", "culture": "M_COMMUNITY",
+                "worship": "M_COMMUNITY", "office": "M_ASSOC", "public_office": "M_ASSOC"},
+}
+VISITOR_CLASS_RATES = {
+    "business": {"normal office": "B_OFFICE", "open-plan office": "B_OPEN_PLAN", "business-oriented services": "B_BOS",
+                 "customer-oriented services": "B_COS", "Services": "B_SERVICES", "research institutes": "B_RESEARCH",
+                 "Public facilities": "B_PUBLIC", "customer service": "B_CUSTOMER_SERVICE", "entertainment, culture": "B_CULTURE",
+                 "retail (small-scale)": "B_RETAIL", "hospitals": "B_HOSPITAL", "Industrial operations / Production": "B_INDUSTRY",
+                 "highly productive industries / machine / material or space intensive": "B_HIGHLY_PRODUCTIVE",
+                 "Yards, depots, storage areas, construction yards": "B_YARDS", "Transport": "B_TRANSPORT",
+                 "wholesale": "B_WHOLESALE", "craft businesses": "B_CRAFT", "vehicle / electrical repair": "B_VEHICLE",
+                 "hotels": "ZERO"},
+    "errands": {"customer-oriented services": "E_GEN_COS", "normal office": "E_PUBOFF", "Services": "E_GEN_SERVICES",
+                "hospitals": "E_HOSPITAL", "retail (small-scale)": "E_GEN_RETAIL", "Public facilities": "E_PUBOFF",
+                "vehicle / electrical repair": "E_VEHICLE", "Yards, depots, storage areas, construction yards": "B_YARDS",
+                "nursing homes": "E_SOCIAL", "craft businesses": "E_CRAFT", "Industrial operations / Production": "B_INDUSTRY",
+                "Transport": "E_TRANSPORT", "customer service": "E_COUNTER", "business-oriented services": "B_BOS",
+                "open-plan office": "B_OPEN_PLAN", "car dealerships": "E_VEHICLE", "entertainment, culture": "E_PUBOFF"},
+    "sports":  {"fitness / wellness": "S_HALL", "Facilities for culture, leisure and sports": "CMP", "schools": "S_HALL",
+                "entertainment, culture": "CMP", "large discos, fun / leisure pools": "S_POOL", "arenas, large events": "S_HALL"},
+    "meetup":  {"nursing homes": "M_CARE", "restaurants / gastronomy": "M_GASTRO", "Services": "M_ASSOC", "normal office": "M_ASSOC",
+                "hospitals": "M_HOSPVISIT", "customer-oriented services": "M_ASSOC", "fitness / wellness": "M_COMMUNITY",
+                "entertainment, culture": "CMP", "Public facilities": "CMP", "Facilities for culture, leisure and sports": "CMP"},
+    "lessons": {"schools": "L_EDU", "universities": "L_EDU", "customer-oriented services": "L_SMALL", "fitness / wellness": "CMP",
+                "Facilities for culture, leisure and sports": "CMP", "Public facilities": "L_FIRE", "normal office": "M_ASSOC",
+                "entertainment, culture": "M_COMMUNITY", "Services": "L_FIRE", "business-oriented services": "L_SMALL",
+                "Yards, depots, storage areas, construction yards": "L_FIRE", "hospitals": "L_EDU"},
+}
+# CMP classes: the first pattern found in the building's step-05 type gives the rate, else the second item
+VISITOR_TYPE_RATES = {
+    "sports":  ([(r"riding|equestrian|\breit", "S_RIDING"), (r"shooting|sch[uü]tzen", "S_SHOOT"),
+                 (r"club ?house|sportheim|vereinsheim", "S_CLUB"), (r"swimming|\bpool|\bbad\b", "S_POOL"),
+                 (r"sports hall|gymnasium|turnhalle|sporthalle|sports centre|sports facility", "S_HALL")], "S_HALL"),
+    "meetup":  ([(r"church|chapel|religious|monastery|parish|kirche|kapelle", "M_WORSHIP"), (r"prison|correctional", "M_PRISON")],
+                "M_COMMUNITY"),
+    "lessons": ([(r"riding|equestrian|\breit", "S_RIDING"), (r"swimming|\bpool|\bbad\b", "S_POOL"), (r"dance|ballet|martial", "L_DANCE")],
+                "S_HALL"),
+}
+VISITOR_DEFAULT_RATES = {"business": "B_SERVICES", "errands": "E_GEN_SERVICES", "sports": "S_HALL", "meetup": "M_ASSOC",
+                         "lessons": "L_EDU"}
+# the POI uses of the sports rates (also read for lessons at sport POIs), of dance schools and of event venues
+VISITOR_SPORT_USES = {
+    "S_FITNESS": frozenset({"fitness_centre", "fitness", "crossfit", "gym"}),
+    "S_POOL":    frozenset({"swimming", "swimming_pool", "public_bath", "water_park", "sauna", "diving"}),
+    "S_ENT":     frozenset({"9pin", "10pin", "bowling", "karting", "laser_tag", "indoor_play", "trampoline_park", "climbing",
+                            "escape_game", "amusement_arcade", "minigolf"}),
+    "S_TENNIS":  frozenset({"tennis", "padel", "squash"}),
+    "S_RIDING":  frozenset({"equestrian", "horse_riding", "riding_school", "riding_hall"}),
+    "S_SHOOT":   frozenset({"shooting", "archery"}),
+    "L_DANCE":   frozenset({"dancing_school", "dance", "dojo", "martial_arts", "yoga", "dancing", "ballet"}),
+    "S_HALL":    frozenset({"sports_centre", "sports_hall", "multi", "gymnastics", "sport", "athletics", "soccer", "table_tennis",
+                            "handball", "basketball", "volleyball", "badminton", "dog_agility", "bowls", "motor", "ice_skating",
+                            "boxing", "judo", "karate", "fencing", "roller_skating", "skateboard", "billiards", "darts", "chess",
+                            "juggling", "multisport"}),
+}
+VISITOR_DANCE_USES = VISITOR_SPORT_USES["L_DANCE"]
+VISITOR_EVENTS_USES = frozenset({"events_venue", "events_centre"})
+VISITOR_CAR_USES = frozenset({"car", "motorcycle", "truck"})
+# a small-format rate applies only up to the group's POINT_SIZE_CAP_M2 (or the default cap)
+VISITOR_SMALL_FORMAT_GROUPS = frozenset({"gastronomy", "small_retail", "personal_service", "counter", "health_practice",
+                                         "community", "small_school"})
+# staff-only places: a POI or building whose name or type says so, or a cafe / practice POI in a building of
+# these classes (a company site)
+VISITOR_STAFF_ONLY_PATTERN = (r"\bcanteen|\bkantine|\bcafeteria|\bstaff (?:restaurant|caf[eé])|\bbetriebsrestaurant|\bwerksrestaurant"
+                              r"|\bbetriebsarzt|\bwerksarzt|\barbeitsmedizin|occupational (?:health|medicine)|\bcompany doctor")
+VISITOR_STAFF_ONLY_GROUPS = frozenset({"gastronomy", "health_practice"})
+VISITOR_STAFF_ONLY_CLASSES = frozenset({"Industrial operations / Production",
+                                        "highly productive industries / machine / material or space intensive", "others",
+                                        "Yards, depots, storage areas, construction yards", "Transport"})
+# Zones with a target of 0 whose places carry the category (the user, 2026-10-06, for Workers): VISUM counts some staff in a
+# neighbouring zone - the Autostadt's (Workers target 0) in the VW plant zone: "people also work here along with people
+# working in the factories". Such a zone's units join the zones of the nearest ring that have a target, each unit's weight
+# split over them in proportion to their targets (so mostly the plant zone), and share those targets by weight with the
+# zones' own carriers; the regional total stays VISUM's. Totals are ignored only for the five labels without a total. In
+# the first run of the floor rules: 88 zones with 942 active buildings (the Autostadt, WOB Kaestorf 3, WOB Kreuzheide 1,
+# Tappenbeck 2, the Koenigslutter hospital zone, the Helmstedt power-plant zone, the Harz zones Torfhaus / Okertalsperre).
+# Extended on 2026-10-07 (the user: "Share, touching zones only") to University, Kindergarten and School: a zone border cuts
+# through a campus, and VISUM counts all its students or pupils on one side. The TU Braunschweig's Biozentrum, BRICS and
+# university library (BS Altes Hochschulviertel 7, University 0) got nothing while the Chemistry Centre next door took 6,131
+# students, 16 % of the region; before, 34 zones with university places, 74 with school places and 88 with Kitas had a
+# total of 0, and their places 31 % of the university floor. For these three only the zones that touch it count (ring 1):
+# a place whose touching zones have no total either takes nothing from the sharing rather than pulling students from a
+# campus further away (the ring fallback of a zone without a place may still reach it) - until 2026-10-08, when such a
+# place was allowed to look up to ring 3 (REDIST_SHARE_ZERO_TARGET_FAR_RINGS below).
+# School goes by type here too: a place that joins a zone takes that zone's types as one of its school places.
+# Revised the same day after an independent check (the user: "Spread over touching zones"): a place joins only zones that
+# have places of their own. A zone with a target but no place keeps the ring fallback as before (its touching zones, or the
+# next ring out where they hold no place); when the places of its zero-total neighbour took its whole target, Seesen 07's
+# 587 pupils went to a village hall and a sports hall, and the Otto-Bennemann-Schule fell to 0. A joined school place splits
+# its weight by the zones' targets of its own types, so a vocational school parks no weight in zones without vocational
+# pupils - unless none of its touching zones has any: it then joins by their School totals and takes only a type its pool
+# has no place for (since 2026-10-08 it first looks up to ring 3 for its own types). The reach stayed ring 1 (the user:
+# "Touching zones, as decided"); a 500 m limit would have cut long rural joins but returned real village schools and Kitas
+# to 0.
+REDIST_SHARE_ZERO_TARGET_CATEGORIES = ("Workers", "School", "University", "Kindergarten")
+REDIST_SHARE_ZERO_TARGET_MAX_RINGS = {"Workers": None,          # None: the nearest ring with a target, however far (2026-10-06)
+                                      "School": 1, "University": 1, "Kindergarten": 1}
+# A place with nothing it could take next door (the user, 2026-10-08: "Up to 3 zones"): where no touching zone holds a total
+# of the category - a school place: of its own types -, with places or without, the place joins the nearest ring up to this
+# one with zones that have such a total and places of their own, its weight split by those totals. Ring 1 alone left 34
+# named or mapped places at 0: Schule Stoeckheim (secondary; no secondary pupils next door), Schule Lehndorf-Ort, the
+# Johannes-Selenka-Schule branch at the Hamburger Strasse, BBS VII, the Hellwinkel Berufsschule, the Welfenakademie, the TU
+# institute on the Pappelberg and 10 Kitas. Up to ring 3 reaches all 34 and moves 1.0 % of School, 2.9 % of University (the
+# Welfenakademie takes 451 students from the Ostfalia Wolfenbuettel zones) and 1.1 % of Kindergarten; ring 2 would have left
+# BBS VII, the Pappelberg institute, the Welfenakademie and the school in Mariental 4 at 0. A place whose touching zones
+# hold a total it could take keeps ring 1 (where that zone has no place, its ring fallback reaches the place): the research
+# buildings in Goslar 20, reached that way, would otherwise have pulled 374 more students from the TU Clausthal campus. A
+# place fed only by the ring fallback of a zone further out still looks further: the Oskar Kaemmer Bildungswerk goes from 50
+# to 175 pupils (Schule Diesterwegstrasse 348 -> 243) and two TU buildings at the Prinzenpark from 125 to 203 students.
+REDIST_SHARE_ZERO_TARGET_FAR_RINGS = {"School": 3, "University": 3, "Kindergarten": 3}
+# Near-zero totals (the user, 2026-10-08; item 3 of the audit of run 7: "Share below 1 %", "Touching zones only"): a zone
+# whose total is above 0 but below max_share of its own Bosserhof expectation (the sum of its Workers weights / 100, i.e.
+# occupied floor / 100 m2 x Bosserhof rate), with min_expected or more expected, counts as a zone with a target of 0 for the
+# sharing above: its units also join the zones within max_ring that have a total which is not near zero and places of their
+# own, each unit's weight split by their totals; it keeps its own small total on its own units and is joined by no zone.
+# The 34 such zones are all residential zones in VISUM with a median total of 1.8 Workers (107 together for 19,224
+# expected), yet they hold the Staedtisches Klinikum Wolfenbuettel (over 1,300 staff with its subsidiaries, total 5.98), the
+# MobileLifeCampus, the Finanzamt Wolfenbuettel and schools; the Workers column is right (SG_3_BE~17 is the sum of the
+# sector columns, and no other column holds the jobs). The sharing moves 16,759 Workers (2.8 %): MobileLifeCampus
+# 16 -> 2,525, the Klinikum's main building 3 -> 60, the Finanzamt 2 -> 141, Velpke 1 0.02 -> 13. Costs: 24 zones lose over
+# a quarter of their total, 16 of them below 3x their expectation (8 below the regional 0.8x; BS Leiferde 1, next to the
+# Klinikum, -78 %); inside a near-zero zone every place takes the same multiple of its rate, so Edemissen 07 ends at 5.9x
+# its expectation (mostly from Peine 15 and Edemissen 01: Grundschule Abbensen 135 Workers, two Kitas over 100) and WB Krz
+# Holz 18 at 5.1x, as the Vechelde villages under the zero-total sharing. Zones with a target of 0 no longer join a
+# near-zero zone: Helmstedt 25 goes to ring 2 (0.18 -> 35 Workers), and together they hold 619 fewer (22,733 -> 22,114).
+# Hohegeiss 03 (Harz holiday flats) finds no touching zone with a total and keeps only its own; the nearest ring would have
+# pulled 1,024 Workers into it, 872 of them from 27-44 km away. Not taken: 2 % (53 zones, 29,557 Workers - the closed
+# Fliegerhorst barracks in Goslar 07 would take 531 from a normal industrial zone), sharing only beside over-full zones,
+# and leaving the totals as they are. The PTB zone (BS Bundesanstalten 1, 3.8 %) is above the threshold and keeps 161
+# Workers for about 1,700 staff, and the Klinikum stays far below its staff, its neighbours holding no surplus - cases for
+# the VISUM owner, like the split of SZ Watenstedt 01/02.
+REDIST_SHARE_NEAR_ZERO_TARGET = {"Workers": {"max_share": 0.01, "min_expected": 100.0, "max_ring": 1}}
+# School by type (the user, 2026-10-06). The School target is three VISUM columns: pupils of primary schools (SG_4_GSCH,
+# 39,085), of secondary schools (SG_4_WFSCH, 77,622) and of vocational schools (SG_4_BS, 33,292 - the Braunschweig-Kolleg and
+# the Wolfsburg-Kolleg count here too: their zones hold BS pupils and no other school; the largest BS zones hold only BBS).
+# Each goes to the zone's school places of its own type, in proportion to their weight. A zone without a place of a type
+# gives that type to all its school places, as before, so every zone keeps its School total; a zone without any school
+# place sends its target to its ring as before, and the ring's places split it by type the same way. 64 zones have pupils
+# of more than one type.
+SCHOOL_TYPE_COLUMNS = {"primary": "SG_4_GSCH", "secondary": "SG_4_WFSCH", "vocational": "SG_4_BS"}
+# A place's types come from its own name and step-07 type (a POI); else from its building's name, its POI names (step 04),
+# its site names (step 06) and its step-05 type; else from the building's ALKIS function; else primary and secondary
+# (SCHOOL_TYPE_DEFAULT: general education - vocational schools are named as such, and a zone without a vocational place
+# still gives its vocational pupils to all its school places). The names are
+# German and are matched without case. The model's types are English, and its secondary-school words are matched with case:
+# "(gymnasium)" there is a sports hall, "Gymnasium" or "Lessinggymnasium" a grammar school. Special schools, Waldorf and
+# international schools teach primary and secondary pupils ("both"); Fach-, Abend- and berufliche Gymnasien, the Kollegs and
+# the nursing and midwifery schools are vocational.
+SCHOOL_TYPE_PATTERNS = {
+    "vocational":     (r"berufsbild|berufsschul|berufsfach|fachschul|fachober|fachgymn|berufliches gymn|berufskolleg|\bBBS\b|kolleg\b"
+                       r"|abendgymn|pflegeschul|hebammenschul|vocational|nursing school|technical college|trade school"
+                       r"|evening (?:secondary|grammar) school"),
+    "both":           (r"förderschul|foerderschul|förderzentrum|sonderschul|special[- ]needs|special school|special education|waldorf"
+                       r"|internationale schule|international school"),
+    "primary":        r"grundschul|\bgrund-|primary|elementary|volksschul|\bG(?:H)?S\b",
+    "secondary_name": (r"gymnasium|realschul|hauptschul|oberschul|gesamtschul|\bIGS\b|\bKGS\b|sekundar|mittelschul|schulzentrum|\bHRS\b"
+                       r"|\bOBS\b|\bGHS\b"),
+    "secondary_type": (r"secondary|grammar school|comprehensive|Gymnasium|[a-zäöüß]gymnasium|Realschul|Hauptschul|Oberschul|Gesamtschul"
+                       r"|\bIGS\b|\bKGS\b|Schulzentrum"),
+}
+# cut from the texts before the secondary words are read (these are vocational)
+SCHOOL_TYPE_STRIP_PATTERN = r"fach-?gymnasium|abend-?gymnasium|berufliches gymnasium|evening (?:secondary|grammar) school"
+SCHOOL_TYPE_ALKIS = {"31001_3021": ("primary", "secondary"),    # general education school
+                     "31001_3022": ("vocational",)}             # vocational school
+SCHOOL_TYPE_DEFAULT = ("primary", "secondary")                  # no evidence at all (167 units in the first run)
+# Who carries School, University and Kindergarten (the user, 2026-10-07; item 5 of the audit of run 7). The education labels come
+# from the model (steps 05 and 07); lib/edu_carriers.py corrects them from evidence already in the data - names, ALKIS functions,
+# the OSM tags of POIs, sites and building outlines, the model's type text - and never re-runs the model. Decided on an
+# independent analysis (five sweeps over every carrier, a design with simulated effects, two checks):
+#   * "Drop it, also without evidence": a unit whose own data name another use loses the education label - a former school, a
+#     village hall, adult / out-of-school education, a Kita building, another occupant of a school site; a social facility,
+#     children's and youth homes, elderly day care, youth clubs, a Kita lot on a church / school / fire station, an all-day school
+#     programme; continuing education, a university rest unit without a university building - and so does a place with no
+#     evidence at all (an annex within 100 m of a school keeps School). A School place in a zone with a School total of 0 known
+#     only from the cadastre or a bare OSM school outline, with no school POI or site within 100 m, joins no neighbour and takes
+#     no ring fallback;
+#   * "Labels and types": real schools typed after a tenant (their Mensa, their Kita) or labelled lessons get the school label;
+#     vocational schools labelled university become vocational School; the school types follow the model's English type words,
+#     OSM isced / grades tags, vocational campuses and the Oskar-Kaemmer sites (vocational);
+#   * "Drop, Mensas too; 3 unclear keep": non-teaching campus parts - Mensa, administration, computing, events, student body,
+#     museum, incubator, boarding houses, toilets ... - lose School / University; a building is the Mensa only where Mensa outlines
+#     cover at least 80 % of it; the Gauss-IT-Zentrum, ZeLL and the Haus der Wissenschaft keep their students;
+#   * "Cap at own size, lift squeezed": the Kita part of a school weighs at most its own polygons (else the childcare point cap)
+#     and gives the rest to School where the unit carries School; a Kita polygon weighs at most its area x its storeys (split
+#     over its labels like any weight); a squeezed Kita POI weighs its own extent. Only the Kita weight changes.
+# A dropped label leaves its floor share empty (k_red unchanged), so no other category moves, and the last-carrier guard restores a
+# zone's only carrier. The two checks of the design (2026-10-07) corrected it before it went in: no Kleine-Burg entry (it named a
+# shop building), the Mensa part test also for University, 80 % instead of 50 %, general-school sites are no vocational campus.
+# Texts are matched folded (lower case, umlauts as ae / oe / ue, ss).
+EDU_CARRIER_RULES = {
+    # --- the words ---------------------------------------------------------------------------------------------------
+    "school_type_word": (r"berufsbild|berufsschul|berufsfach|fachschul|fachober|fachgymn|berufliches gymn|berufskolleg|\bbbs\b|kolleg\b"
+                         r"|abendgymn|pflegeschul|hebammenschul|foerderschul|foerderzentrum|sonderschul|waldorf|internationale schule"
+                         r"|grundschul|\bgrund-|volksschul|\bg(?:h)?s\b|gymnasium|realschul|hauptschul|oberschul|gesamtschul|\bigs\b|\bkgs\b"
+                         r"|sekundar|mittelschul|schulzentrum|\bhrs\b|\bobs\b|\bghs\b"),
+    "school_type_word_en": (r"primary|elementary|secondary|grammar school|comprehensive|special[- ]needs|special school|special education"
+                            r"|nursing school|technical college|trade school|gymnasium|realschul|hauptschul|oberschul|gesamtschul"
+                            r"|grundschul|berufsschul|\bbbs\b"),
+    "vocational_school_name": (r"optiker|physiotherap|ergotherap|logopaed|pflegeschul|krankenpflege|altenpflege|hebammen|rettungs"
+                               r"|\bmta\b|\bpta\b|podolog"),     # a health-profession school is vocational (the annex test)
+    "school_general_word": (r"grundschul|gymnasium|realschul|hauptschul|oberschul|gesamtschul|\bigs\b|\bkgs\b|foerderschul|schulzentrum"
+                            r"|primary|secondary"),
+    "school_any": r"schul|school|gymnas",
+    "kita_strong": (r"kita|kindertagesstaett|kindergarten|kiga|krippe|hort\b|kindergruppe|spielkreis|kindertagespflege|tagesmutter"
+                    r"|tagesvater|grosstagespflege|tagespflegestelle|schulkindbetreuung|schulkindgruppe"),
+    "kita_not": (r"kinderheim|jugendheim|jugendhilfe|erziehungshilfe|wohngruppe|kinderdorf|inobhutnahme|jugendwohn|jugendzentrum"
+                 r"|jugendtreff|jugendclub|jugendhaus|jugendfreizeit|bauspielplatz|abenteuerspielplatz|(?<!kinder)(?<!gross)tagespflege(?!stelle)"
+                 r"|seniorentag|altentages|familienentlast|muetterzentrum|mehrgenerationenhaus"),
+    "kita_type_en": r"\bkita\b|kindergarten|kindertages|creche|nursery|day[- ]?care|childcare|child care|krippe",
+    "univ_word": r"universit|(?<!volks)hochschul|\btu\b|ostfalia|\bhbk\b|fakult|hoersaal|audimax",
+    # --- not that kind of place (D1) and non-teaching parts (D3): School -----------------------------------------------
+    "school_alkis": ["31001_3021", "31001_3022"],
+    "former_school_name": r"\balte[nrs]?\s+(?:\w+\s+)?\w*schule",
+    "village_house": r"\bdgh\b|dorfgemeinschaftshaus|buergerhaus|gemeinschaftshaus|gemeindezentrum|community cent(?:re|er)",
+    "adult_education": (r"akademie|academy|volkshochschul|\bvhs\b|bildungshaus|bildungsstaette|bildungswerk|(?<!berufs)(?<!landes)bildungszentrum"
+                        r"|lehranstalt|berufsfoerderungswerk|forst\w* (?:bildungs|ausbildungs)|forestry|kunstschule|musikschule|art school"
+                        r"|music school|verkehrsschule|traffic school|nachhilfe|tutoring|lernstudio|schuelerhilfe|studienkreis"
+                        r"|(?<!state )education(?:al)? cent(?:re|er)|jugendwerkstatt|youth workshop|bildungs-? (?:und|&) kultur"),
+    "adult_education_keep": r"technikakademie|steinmetz|os[ck]ar[- ]?k(?:ae|a)mmer",     # vocational schools despite the word
+    "other_occupant_ok_uses": ["school", "sports_hall", "sports_centre", "library", "theatre", "kindergarten", "childcare"],
+    "type_tail": r"\s+(?:on|at|in|of|near|within)\s+",
+    "near_school_m": 100.0,
+    "school_mensa_name": r"^\s*(?:mensa|speisesaal|kantine)(?:haus|gebaeude)?\b",
+    "school_board_name": r"^\s*(?:internat|jungenhaus)",
+    "school_mensa_head": r"canteen|cafeteria|dining hall|mensa",
+    "school_other_head": r"boarding house|dormitor|\binternat\b|administrat|secretariat|toilet|sanitary|heating|garage|storage",
+    "school_teaching_head": r"boarding school(?!\s+(?:dormitor|house|residence))|classroom|teaching|lecture",
+    "school_head_tail": r"\s+(?:of|for|at|on|in)\s+",
+    "mensa_outline_name": r"mensa|speisesaal|kantine|canteen|cafeteria|dining|refectory",
+    "mensa_min_cover": 0.8,
+    # --- Kindergarten ----------------------------------------------------------------------------------------------------
+    "kita_uses": ["kindergarten", "childcare"],
+    "social_uses": ["social_facility", "day_care"],
+    "kita_other_use_alkis": r"^31001_(?:304\d|3061|3072|3211)$",
+    "kita_other_use_osm": ["school", "church", "chapel", "cathedral", "fire_station", "sports_hall"],
+    "kita_other_use_name": r"schule|kirche|gemeindehaus|dorfgemeinschaftshaus|feuerwehr|sporthalle|turnhalle|jugend",
+    "all_day_school": r"ganztag|\bogs\b",
+    # --- University ------------------------------------------------------------------------------------------------------
+    "univ_alkis": ["31001_3023", "31001_3024"],
+    "univ_uses": ["university", "college"],
+    "continuing_education": (r"weiterbildung|continuing education|adult education|volkshochschul|\bvhs\b|bundesakademie|handwerker-institut"
+                             r"|crafts training|coding|berufsfoerderungswerk|retraining"),
+    "univ_non_teaching": (r"\bevents?\b|administrat|verwaltung(?!sgericht)|service office|servicebuero|studienberatung|sekretariat"
+                          r"|gleichstellung|personalrat|technologietransfer|geschaeftsstelle|hochschuldidaktik|lehren und lernen|bafoeg"
+                          r"|stabsstelle|\basta\b|studierendenhaus|studentenzentrum|fachschaft|museum|sammlung|rechenzentrum|computing cent"
+                          r"|data cent|pfoertner|chemikalien|\bsupply\b(?! engineer)|heating plant|betriebstechnik|gruendungszentrum|incubator"),
+    "dining": r"mensa|cafeteria|canteen|dining",
+    "univ_teaching_head": r"lecture hall|hoersaal|teaching building|faculty building|fakultaetsgebaeude|institut|research cent",
+    "univ_keep_ids": ["DENIAL0100005Y9F", "way/24385572", "DENIAL0100005WGk#rest"],   # Gauss-IT-Zentrum, ZeLL, Haus der Wissenschaft
+    "univ_drop_ids": ["DENIAL0600001Ate", "DENIAL0300008Gkk"],   # SAB Schiessanlage; Walther-Nernst-Str. 3 Clausthal (no rule fits)
+    # --- the right label and type (D2) ------------------------------------------------------------------------------------
+    "add_school_min_floor_m2": 2000.0,
+    "school_name": (r"(?<!musik)(?<!kunst)(?<!tanz)(?<!fahr)(?<!sprach)(?<!volkshoch)(?<!hoch)(?<!verkehrs)schul|gymnasium|kolleg\b|\bbbs\b"
+                    r"|\bigs\b|\bkgs\b"),
+    "replaced_use": (r"volkshochschul|\bvhs\b|adult education|akademie|bildungszentrum|bildungswerk|bildungsstaette|berufsfoerderungswerk"
+                     r"|musikschul|music school|tanzschul|dance school|museum|jugendamt|refugee|fluechtling|\bdgh\b|dorfgemeinschaft"
+                     r"|kulturverein|wohngruppe|ehemalig|former|alte schule|hochschul|universit"),
+    "vocational_word": (r"kolleg\b|fachschul|berufsbild|berufsschul|berufsfach|altenpflege|pflegeschul|hebammenschul|rettungsschul|\bbbs\b"
+                        r"|vocational|(?<!weiter)bildungszentrum"),
+    "not_vocational": r"studienseminar|universit|ostfalia|\btu\b|akademie|berufsfoerderungswerk",
+    "not_vocational_type": r"berufsfoerderungswerk",
+    "lessons_not_school": (r"musik|music|tanz|dance|ballet|fahrschul|driving|sprach|language|nachhilfe|tutoring|vhs|volkshochschul"
+                           r"|studienseminar|teacher[- ]training|lehrerausbildung|flug|flight"),
+    "type_text_fixes": [(r"vocational secondary", "vocational"), (r"Gymnasium \((?:sports hall|gym[^)]*)\)", "sports hall")],
+    "oskar_kaemmer": r"os[ck]ar[- ]?k(?:ae|a)mmer",
+    "oskar_kaemmer_not_site": r"remenhof",
+    # --- Kita weights (D4) -----------------------------------------------------------------------------------------------
+    "kita_polygon_max_cover": 0.8,
+    "kita_point_merge_m": 15.0,
+    "kita_squeezed_share": 0.25,
+    "kita_median_part_m2": 227.0,
+    # --- the inputs ------------------------------------------------------------------------------------------------------
+    "outline_buildings": ["school", "university", "college", "kindergarten", "church", "chapel", "cathedral", "fire_station",
+                          "sports_hall", "ruins", "abandoned", "disused"],
+    "outline_amenities": ["school", "university", "college", "kindergarten", "childcare", "fire_station"],
+}
+# The Workers sectors - only a check (the user, 2026-10-06). VISUM also splits each zone's Workers into three sectors, each
+# in two (SG_3_BES~8 = ~9 + BE~10, BE~11 = ~12 + ~13, BE~14 = ~15 + ~16; the three add up to SG_3_BE~17 in every zone), but
+# with one fixed mix per city or district for all its zones (Braunschweig 21.0 / 19.8 / 59.2 %, Wolfsburg 61.1 / 10.4 /
+# 28.5 %; in the Landkreise per municipality). So the split says nothing about the places inside a zone and is not used for
+# the allocation; notebook 08 prints our Workers per sector and district next to VISUM's. A class's sector is a reading of the
+# building type, so the two cannot match exactly: the statistics count a VW office as industry, we count it as an office.
+WORKER_SECTOR_COLUMNS = {"industry": "SG_3_BES~8", "trade, transport, hospitality": "SG_3_BE~11", "other services": "SG_3_BE~14"}
+WORKER_SECTOR_CLASSES = {                       # every class not listed: other services
+    "industry": frozenset({"Industrial operations / Production", "highly productive industries / machine / material or space intensive",
+                           "others", "craft businesses", "craft courtyards", "Crafts and trades"}),
+    "trade, transport, hospitality": frozenset({"retail (small-scale)", "Retail", "discount stores", "DIY stores", "furniture stores",
+                                                "hypermarkets / superstores", "shopping centers", "self-service department stores",
+                                                "department stores", "factory outlet centers", "wholesale", "car dealerships",
+                                                "suppliers for car dealerships", "vehicle / electrical repair", "restaurants / gastronomy",
+                                                "hotels", "hotels with conference areas", "Transport",
+                                                "Yards, depots, storage areas, construction yards"}),
+}
+ZONE_DISTRICT_COL = "RO_LANDK~1"                # the city or district (Landkreis) of a zone
+# The labels of steps 06 and 07 reconciled by OSM use (the user, 2026-10-08; item 4 of the audit of run 7; lib/label_rules.py,
+# notebook 08 sections 4.4c, 4.6b and after 4.7). Step 06 labelled each building whole - a building with one POI was not asked
+# again - and step 07 each POI of a shared building on its own. Both used the same label definitions, yet they read the same kinds
+# of place differently: fast food carried retail_daily on 44 % of the one-POI buildings (144 of 326) and on 6 % of the asked POIs
+# (14 of 240); 46 of 136 asked pharmacies were errands only while all 128 pharmacy buildings carried retail_daily; a beverage
+# market was retail_non_daily in 35 % of the buildings and 4 % of the POIs; a travel agency retail_non_daily in 19 of 31 buildings
+# and 0 of 45 POIs; and 46 pools, bowling alleys, climbing halls and an ice rink carried sports without leisure next to 135 venues
+# of the listed kinds (92 of them pools) that carry it. The rules set what such a place carries from its own OSM use and data
+# (the user chose every recommendation):
+#   * eating_places "Leisure, not retail": an eating or drinking place carries leisure instead of retail_daily /
+#     retail_non_daily - eating out is free time by the definitions (MiD: Freizeit). A building filed in another class than a
+#     restaurant or small shop (a hospital, hotel, clubhouse, pool or parking deck with a cafe) only loses the retail labels;
+#     shops with seating (bakery cafes, butchers, a kiosk that is no food or snack kiosk, a book cafe ...) and buildings filed as
+#     stores keep theirs, and so do staff canteens and Mensas (item 6 of the audit);
+#   * pharmacies and fuel ("All three rules", with daily_shops): a pharmacy carries retail_daily - medicines and drugstore goods
+#     are daily needs; this is the pharmacy's own use, not errands feeding Retail_Daily, which still feeds nothing (2026-10-05).
+#     A fuel station carries retail_daily for its shop, unless its data show it has none (an automat, a private pump, a gas-only
+#     pump, a works, dealer, farm or airfield pump): there retail_daily becomes errands, the refuelling itself (visitor rate 0),
+#     after the canopy pass of 4.7, so that a shop a canopy passed it to is caught too. A building typed as a car wash is left alone;
+#   * daily_shops: a beverage market, kiosk, newsagent, tobacco or lottery shop carries retail_daily instead of
+#     retail_non_daily; wine, spirits, sweets and e-cigarette shops keep their reading (occasional or specialist goods; for tobacco
+#     and lottery, which both runs also read as retail_non_daily, the definition and MiD decide), and producers' own shops and
+#     souvenir / tourist / pool kiosks are left out;
+#   * services "No RND for services": the POI groups counter and personal_service (beauty salons, travel agencies, tailors,
+#     rentals, tattoo studios, betting shops, photographers, insurance ...) carry no retail_non_daily - they sell a service;
+#     phone shops, post counters and six listed shops that also sell goods keep it. The rest unit of a building whose active asked
+#     POIs are all such services loses it too;
+#   * venues "Venues get leisure": a public pool, ice rink, bowling alley, climbing hall (and kart track, trampoline park, mini
+#     golf, escape room, laser tag, indoor play centre) labelled sports gets leisure too, from its own OSM values, name, type head
+#     or ALKIS function; never a school, therapy, hotel, club, fitness or private pool, a private or closed POI, nor a building
+#     without a POI, a name or a site (the cadastre still lists the Peine pool demolished in 2018). Sports still never feeds Leisure;
+#   * rest_sources "The POI's answer wins": a Retail_Daily, Retail_Non-Daily or Leisure rest label goes where an active asked POI
+#     of the same building is its evident source - step 06 gives that label to at least min_rate of the one-POI buildings of that
+#     POI's use (of its group where the use has fewer than min_n such buildings) - and step 07 labelled that POI without it
+#     (HORNBACH's grill bar gave the DIY store 2,900 Retail_Daily). A rest label that a dropped non-occupant POI carries, or that
+#     the building's own data name (own_evidence), stays even where a POI is its evident source, and so does one without any source
+#     (keep all, 2026-10-02). For community centres this takes step 07's meetup reading: 7 of their Leisure rest labels go (the
+#     guard keeps 2);
+#   * a label a rule takes off a POI does not come back as a rest unit of its building; a dropped label's share goes to the unit's
+#     other labels and an added label takes a share ("Goes to its other labels": the place then counts like an equal place the
+#     model read right), while the education drops of 2026-10-07 keep their share empty.
+# The last-carrier guard keeps a zone's only carrier of a category: that category stays on it at its weight before the rules, and
+# a label a label rule took off counts again in its unit's split. Effect against run 13: Retail_Daily 42,864 moved (4.72 %),
+# Retail_Non-Daily 24,548 (3.16 %), Leisure 9,423 (4.23 %); Workers, School, University and Kindergarten unchanged; errand
+# visitors -7,663 a day (the 46 pharmacies share their floor with retail_daily now), sports -2,294 (the venues with leisure).
+# HORNBACH's rest unit 2,900 Retail_Daily -> 0, Globus Baumarkt Salzgitter (DENIAL050000bTEd) 1,917 -> 0, VW Halle 6 1,116 -> 0
+# (the VW Oase staff restaurant's own rest unit goes 386 -> 1,014 - item 6), SELGROS 432 Retail_Non-Daily -> 0; the Eissporthalle
+# Salzgitter 0 -> 1,200 Leisure and the Vereinsheim next to it 1,036 -> 79; Shawarma Hut 703 Retail_Daily -> 55 Leisure; Hol'ab in
+# WB Linden 20 (DENIAL060000cN4P) 83 Retail_Non-Daily -> 912 Retail_Daily; the Apotheke Am Schwarzen Berge's Retail_Daily moves
+# from a 74 m2 rest unit onto the pharmacy (its building 776 -> 1,164); 33 station units without a shop give up retail_daily for
+# errands. Rest units hold Retail_Daily 2,172 (was 15,610), Retail_Non-Daily 10,155 (12,715) and Leisure 648 (1,137). The guard
+# restores 17 more rows than in run 13 (27 in all), each a zone's only carrier: the rest unit of the building with two tattoo
+# studios keeps the 2,584 Retail_Non-Daily of BS Wilhelmitor - Sued 5, the M+C Doener its 241 Retail_Daily. No zone is newly on
+# the ring fallback (Retail_Daily 33 -> 32 zones, Leisure 83 -> 81). The labels in the output file stay as the model gave them;
+# the rules show in the values only. Not covered (seen in the scan, not decided): community centres as places (leisure on 52 % of
+# the one-POI buildings, 31 % of the asked POIs), coffee shops, wholesale, dance halls, historic places, and step 06's
+# retail_daily / retail_non_daily split on buildings without a POI.
+LABEL_RULES = {
+    "eating_places": {
+        "uses": ("restaurant", "fast_food", "cafe", "pub", "bar", "ice_cream", "biergarten", "food_court", "hookah_lounge", "internet_cafe",
+                 "outdoor_seating"),                                   # POI_GROUPS gastronomy without the caterers
+        "drop": ("retail_daily", "retail_non_daily"),
+        "add": ("leisure",),
+        "place_classes": ("restaurants / gastronomy", "retail (small-scale)"),      # elsewhere only the retail labels go
+        "store_classes": ("Retail", "wholesale", "discount stores", "DIY stores", "furniture stores", "hypermarkets / superstores",
+                          "shopping centers", "self-service department stores", "department stores", "factory outlet centers",
+                          "car dealerships"),
+        "shop_pattern": (r"bakery|b[äa]ck(?:er\b|erei|stube|shop|waren)|konditor|confection|patisserie|butcher|fleischer|metzger"
+                         r"|farm shop|hofl[äa]d"
+                         r"|regional[- ]products|regionalladen|wine shop|weinladen|garden cent|gartencent|\bbook|buchcaf|buchhandl"
+                         r"|roaster|roastery|r[öo]sterei|chocolat|schokolad|with a (?:small )?retail shop|l[äa]dchen"),
+        "kiosk_pattern": r"\bkiosk",                                   # a kiosk is a shop with seating ...
+        "kiosk_food_pattern": r"\bfood|snack|imbiss|take-?\s?away|ice[- ]?cream",   # ... unless its name or type says food or snacks
+        "staff_pattern": r"\bmensa\b",                                 # with VISITOR_STAFF_ONLY_PATTERN and VISITOR_STAFF_ONLY_CLASSES
+    },
+    "pharmacies": {
+        "uses": ("pharmacy",),
+        "add": ("retail_daily",),
+    },
+    "fuel": {
+        "uses": ("fuel",),
+        "no_shop_add": ("errands",),
+        "no_shop_tags": {"automated": "yes", "self_service": "only", "access": ("private", "no"), "shop": ("no",)},   # and vending_machine=fuel
+        "diesel_only": True,                   # a truck stop with diesel only (petrol tags present, none yes) has no shop (2026-10-09)
+        "gas_only_fuels": ("fuel:lpg", "fuel:cng", "fuel:lng", "fuel:biogas", "fuel:h2", "fuel:hydrogen"),   # only these, no brand
+        "no_shop_pattern": (r"automat|\bsb[- ]?tank|self[- ]service fuel|selbstbedien|tankpool|\btinq\b"
+                            r"|\blpg\b|autogas|\bcng\b|erdgas|natural gas|\blng\b|biolng|wasserstoff|hydrogen|h²|\bh2\b"
+                            r"|diesel (?:fuel )?station|diesel[- ]?tankstelle"
+                            r"|premises|factory|volkswagen|\bvw\b|werk\b|on[- ]site fuel|fuel pump building|production hall"
+                            r"|industrial facility|industriepark|industrial park|autohaus|dealership"
+                            r"|mineral[oö]l|brennstoff|saatzucht|aircraft|\bair ?bp\b"),
+        "site_pattern": (r"premises|factory|volkswagen|\bvw\b|werk\b|on[- ]site fuel|fuel pump building|production hall|industrial facility"
+                         r"|industriepark|industrial park"),          # a POI's building type that marks a company site
+        "shop_type_pattern": r"convenien|(?<!repair )(?<!parcel )(?<!work)shop\b|store\b|bistro|caf[eé]|restaurant|supermarket",
+    },
+    "daily_shops": {
+        "uses": ("beverages", "kiosk", "kiosk;ticket", "lottery", "newsagent", "tobacco", "tobacco;lottery"),
+        "named_uses": ("alcohol", "wine"),                             # a beverage market tagged as a liquor shop ...
+        "name_pattern": r"getr[äa]nk|durst",                           # ... and named so
+        "exclude_pattern": (r"brauerei|brauhaus|braust[äa]tt|brewery|brennerei|distill|destill|mosterei|kelterei|fruchtsaft|fruchtwein"
+                            r"|imkerei|honig|honey|fabrikverkauf|werksverkauf|factory|outlet\s+(?:shop|store)|weingut|winery|winzer"
+                            r"|kloster|monaster|souvenir|touris|i-?punkt|information|swimming|schwimm|freibad|strandbad|hallenbad"
+                            r"|e-?zigarett|e-?cigarett|vape|vaping"),
+        "exclude_classes": ("factory outlet centers",),
+        "add": ("retail_daily",),
+        "drop": ("retail_non_daily",),
+    },
+    "venues": {
+        "classes": {                                                   # OSM uses / leisure / amenity / first sport value, names, type heads
+            "pool": {"uses": ("public_bath", "swimming", "swimming_pool", "water_park"),
+                     "names": (r"hallenbad|freibad|schwimmbad|schwimmhalle|erlebnisbad|spa(?:ss|ß)bad|freizeitbad|familienbad|sportbad"
+                               r"|stadtbad|waldbad|wellenbad|naturbad|strandbad|kombibad|badeland|badezentrum|badeanstalt|badeparadies"
+                               r"|wasserwelt|\btherme"),
+                     "types": (r"swimming|\bpools?\b|\bbaths?\b|bathing|bathhouse|water ?park|aquatic|\blido\b|\btherme\b"
+                               r"|thermal (?:bath|spa|pool)|badeanstalt|freibad|hallenbad|schwimm|freizeitbad|erlebnisbad")},
+            "ice": {"uses": ("curling", "ice_hockey", "ice_rink", "ice_skating", "ice_stock"),
+                    "names": r"(?<![a-zäöüß])eis(?:halle|sport|stadion|bahn|-?arena|lauf)",
+                    "types": r"\bice[- ]?(?:rinks?|arenas?|stadium|halls?|sports?|skating|hockey)\b|(?<![a-zäöüß])eis(?:halle|sport|stadion)"},
+            "bowling": {"uses": ("10pin", "9pin", "bowling", "bowling_alley"),
+                        "names": r"bowling|kegel",
+                        "types": r"bowling|nine-?pin|ten-?pin|9-pin|10-pin|skittle|kegel"},
+            "climbing": {"uses": ("bouldering", "climbing", "climbing_adventure"),
+                         "names": r"kletter|boulder|hochseilgarten|greifhaus",
+                         "types": r"climbing|bouldering|high[- ]ropes|ropes? course"},
+            "kart": {"uses": ("karting",),
+                     "names": r"\bkart(?!offel|e\b|en\b|ei)",
+                     "types": r"\bkart(?:s|ing)?\b|go-?kart"},
+            "trampoline": {"uses": ("trampoline", "trampoline_park"),
+                           "names": r"trampolin|sprung ?fabrik|you ?jump|jump ?house",
+                           "types": r"trampolin"},
+            "minigolf": {"uses": ("miniature_golf", "minigolf"),
+                         "names": r"mini-?golf|schwarzlicht",
+                         "types": r"mini ?golf|minigolf|crazy golf|adventure golf|black[- ]?light golf"},
+            "escape": {"uses": ("escape_game",), "names": r"escape", "types": r"escape[- ]?(?:room|game)"},
+            "lasertag": {"uses": ("laser_tag",), "names": r"laser ?tag|laser ?game", "types": r"laser[- ]?tag|laser game"},
+            "play": {"uses": ("indoor_play",),
+                     "names": r"spielparadies|indoor-?spielplatz|monkey ?town|hally ?gally|abenteuerland|tobeland|spielwelt",
+                     "types": (r"indoor play|play ?(?:centre|center|hall|land)|soft[- ]?play|indoor playground|adventure park"
+                               r"|fun ?(?:park|centre|center)")},
+        },
+        "exclude_pattern": (r"lehrschwimm|schulschwimm|\bschool|schul|teaching|instruction|bewegungsbad|therap|rehab|\breha\b|physio"
+                            r"|clinic|klinik|hospital|medical|\bhotel|club ?house|clubhouse|vereinsheim|sportheim|\bclubs?\b|private|fitness"),
+        "class_exclude_patterns": {"pool": r"billiard|billard|pool ?hall|pool ?table|car ?pool"},
+        "closed_tag_pattern": r'"access"\s*:\s*"(?:private|no)"|"(?:disused|abandoned|was|demolished|removed|razed):(?:leisure|sport|amenity)"\s*:',
+        "alkis_functions": {"pool": ("31001_3221",)},                  # indoor swimming pool
+        "never_with": ("school", "university", "childcare"),
+        "add": ("leisure",),
+    },
+    "services": {
+        "groups": ("counter", "personal_service"),
+        "keep_uses": ("telecommunication", "post_office"),
+        "keep_poi_ids": ("node/1374204427", "node/3696421625", "node/5184463568", "node/1708300523", "node/11766518550", "node/3387445099"),
+        # Parfuemerie Peter, Haar Pflege Shop, Muranoglas, PKW-Anhaenger Verleih und Verkauf, IRIS Aenderungsschneiderei / Second Hand,
+        # Foto Asmus (OSM craft=photographer, a photo shop and studio by its listings)
+        "drop": ("retail_non_daily",),
+    },
+    "rest_sources": {
+        "labels": ("retail_daily", "retail_non_daily", "leisure"),
+        "min_rate": 0.25,
+        "min_n": 5,
+        "own_evidence": {                                              # the building's own data that name the label's kind
+            "retail_daily": {"sites": ("mall", "marketplace", "supermarket"), "tags": ("supermarket", "kiosk", "mall"), "codes": (),
+                             "names": (r"\bmarkt\b|markthalle|supermarkt|einkaufs|center\b|centre\b|passage|arkaden|galerie|shops\b"
+                                       r"|laden\b|kiosk")},
+            "retail_non_daily": {"sites": ("mall", "marketplace", "outlet", "department_store"), "tags": ("mall", "department_store"),
+                                 "codes": (),
+                                 "names": (r"\bmarkt\b|markthalle|einkaufs|center\b|centre\b|passage|arkaden|galerie|shops\b|outlet"
+                                           r"|kaufhaus|baumarkt|möbel")},
+            "leisure": {"sites": ("theme_park", "zoo", "water_park", "resort", "camp_site", "attraction", "museum", "castle",
+                                  "golf_course", "stadium"),
+                        "tags": ("hotel", "theatre", "cinema", "stadium", "grandstand"),
+                        "codes": ("31001_2072", "31001_3031", "31001_3032", "31001_3033", "31001_3034", "31001_3036", "31001_3038"),
+                        "names": r"hotel|kino\b|theater|museum|schloss|freizeit|erlebnis|bowling|freibad|stadion"},
+        },
+    },
+}
+# Small places stay small (the user, 2026-10-06: "we cannot prevent misclassification but we can prevent the effects of it later
+# during redistribution ... by keeping it lower for the small places as intended"). On top of the one-floor rule, a unit of
+# small-scale retail or a restaurant occupies at most the typical size of its kind - the p90 of the mapped shops and restaurants,
+# the caps the point POIs already take (POINT_SIZE_CAP_M2: small_retail 748 m2, gastronomy 438 m2): a building the model filed as
+# one of them (the trailer dealer Anssems, 21,653 m2; garden centres of 11,560 and 10,363 m2; a parking deck typed as a fast-food
+# restaurant that took 1,476 of its zone's 5,331 Retail_Daily), its rest unit, and a POI of these groups mapped as a point where it
+# shares a building as one facility or is its main occupant (until now the only points without a cap). The cut floor carries
+# nothing. Food stores keep their size: a building whose step-05 type names one, or whose only POI is a food store or big box
+# (POI_ANCHOR_GROUPS) - a supermarket filed as small-scale retail. Simulated on the run before: 495 building units, moving
+# Retail_Daily 1.6 %, Retail_Non-Daily 3.3 %, Leisure 1.1 % and Workers 1.0 % within their zones.
+SMALL_PLACE_CAP_GROUPS = {"retail (small-scale)": "small_retail",           # class -> the POI group whose size cap applies
+                          "restaurants / gastronomy": "gastronomy"}
+SMALL_PLACE_EXEMPT_TYPE_PATTERN = (r"supermarket|discount|grocery|food store|lebensmittel|hypermarket|rewe|edeka|netto|lidl|aldi|penny"
+                                   r"|kaufland|globus|famila|combi|markant|nahkauf|marktkauf")
+# Places without evidence (the user, 2026-10-06): a building unit with no POI of its own, no name (ALKIS, or on its OSM outline:
+# Marktkauf) and no site other than a landuse area (REDIST_LANDUSE_USES; a shop polygon around it - Galeria, Hornbach - is
+# evidence) - its labels are the model's reading of the ALKIS function or of a landuse area around it - counts a quarter in these
+# categories; Workers and the school categories keep their full weight. Example: a round building in BS Stadtkern 5
+# (DENIAL0100005y51) typed "small retail store" from ALKIS "trade and services" and the landuse=retail block around it held 2,167
+# Retail_Daily on one floor of 352 m2. Before this rule such places held 17 % of Retail_Daily, 17 % of Retail_Non-Daily and 8 % of
+# Leisure; in 40 zones they are the only Retail_Daily carriers and keep the whole target.
+REDIST_NO_POI_WEIGHT = 0.25
+REDIST_NO_POI_CATEGORIES = ("Retail_Daily", "Retail_Non-Daily", "Leisure")
+
+
+# ==========================================================================================================================
+# The remaining items of the audit of run 7 (2026-10-09). The user: "Complete the task and assume my choice as what you
+# recommend" - every decision below is the recommended option of the analysis (SCR rest5/results, checked by an independent
+# critic). The effect of each rule alone is against run 14; all together against run 14 at the end of the block.
+# ==========================================================================================================================
+
+# --- item 6: staff catering (lib/staff_catering.py; notebook 08 section 4.8) --------------------------------------------------
+# Works canteens, staff cafes and snack bars on company sites, school and university Mensas and hospital cafeterias carry none of
+# retail_daily / retail_non_daily / leisure: their guests are the staff, pupils and students counted as Workers, School or
+# University (the reason behind the decided visitor zero for staff-only places, 2026-10-06, and item 5's Mensa drop). A unit is
+# staff catering by its own name, model type or OSM amenity=canteen (words), or as an eating place in a works-class building or
+# on a company site; never a shop, a place in a store-class building or a public canteen by name (an allotment canteen, a
+# theatre canteen, a pizzeria, an outlet cafe). The rest unit of such a building loses retail_daily and leisure too ("the
+# canteen answers": the VW Oase staff restaurant's rest unit held 1,014 Retail_Daily, 81 % of WOB VW-Werk, mostly ring
+# inflow). A dropped label's share goes to the unit's other labels (as for item 4); the last-carrier guard keeps a zone's only
+# carrier. Ring fallbacks are left as they are: afterwards only about 6.5 Retail_Daily of them reach staff places.
+# Alone against run 14: 86 units, 6 rest units; Retail_Daily 8,283 (0.91 %), Leisure 1,357, University 196 and School 184 move
+# (the IGS Sassenburg building gains School, the Ostfalia Mensa building in Salzgitter University); business +196 a day.
+STAFF_CATERING_RULES = {
+    "words": (r"canteen|kantine|caf[eé]teria|\bmensa\b|\bmensen\b|staff (?:restaurant|caf[eé]|dining)|employee(?:s'?)? (?:restaurant|caf[eé]|canteen|dining)"
+              r"|workplace (?:restaurant|canteen)|company (?:restaurant|canteen|cafeteria)|works (?:restaurant|canteen)|factory (?:restaurant|canteen)"
+              r"|betriebsresta|werksrestaurant|werksgasthaus|personal(?:kantine|restaurant|casino)|mitarbeiter-?(?:restaurant|kantine|caf)"
+              r"|speisesaal|dining hall|refectory"),
+    "public": r"garten|garden|allotment|theaterkantine|theatre canteen|pizzeria|factory outlet|designer outlet|fabrikverkauf|werksverkauf",
+    "shop_groups": ("small_retail", "food_store", "big_box", "department_store", "fuel"),
+    "works_classes": ("Industrial operations / Production", "highly productive industries / machine / material or space intensive", "others"),
+    "company_site_uses": ("factory", "works"),              # a plant's premises (step-06 site rows)
+    "named_site_uses": ("industrial",),                     # ... or an industrial site named after a company, not an estate
+    "estate_pattern": r"gewerbe|industrie|gebiet|park\b|stra(?:ss|ß)e|weg\b|allee|platz|hafen|area|estate|zone|viertel",
+    "drop": ("retail_daily", "retail_non_daily", "leisure"),
+    "rest_labels": ("retail_daily", "leisure"),            # what a canteen can be the source of on its building's rest unit
+    "kind_hospital": r"\bhospitals?\b|klinik|krankenhaus|\bclinics?\b",
+    "kind_school": r"(?<!hoch)schul|\bschools?\b|gymnas|gesamtschule|\bigs\b|\bkgs\b|bildungshaus|internat",
+    "kind_university": r"universit|hochschul|\btu\b|ostfalia|\bhbk\b|studierend|studentenwerk|fachhochschul|\bmensa\b",
+    "school_classes": ("schools",), "university_classes": ("universities",), "hospital_classes": ("hospitals",),
+    "school_functions": ("31001_3021", "31001_3022", "31001_3020"), "university_functions": ("31001_3023",),
+    "hospital_functions": ("31001_3051", "31001_3052"), "hospital_tags": ("hospital", "clinic"),
+    # staff shops (round 16, 2026-10-09, on the user's behalf): a shop or kiosk unit inside a plant serves its staff like the
+    # canteen - a POI of a shop group (not a big box, car dealer or fuel station: those are public at a works gate), a one-POI
+    # building whose POI is one, or a building without a POI whose type head names a kiosk or shop; in a building filed in a works
+    # class AND on a company site with a name; never public by its own words. It joins staff catering (no retail / leisure, the
+    # share to its other labels, the guard kept) and counts no visitors (the staff-only zero of 2026-10-06). Siemens' 'chicco di
+    # caffe' (access=private) held 428.9 Retail_Daily, 26 % of BS Hauptbahnhof 2. Alone against run 15: 8 units, 7 of them with a
+    # retail label (the 8th, an OSM elevator in a VW hall filed as small_retail, changes nothing); Retail_Daily 486,
+    # Retail_Non-Daily 4 move; errands -181 a day (a bogus 'pharmacy' in a Salzgitter rolling mill).
+    "shops": {"groups": ("small_retail", "food_store", "department_store"),
+              "head_pattern": r"\bkiosk|\bconvenience\b|\bshop\b|\bstore\b|\bimbiss\b",
+              "public": r"\boutlet\b|lagerverkauf|direktverkauf|hofl[aä]den|farm shop|showroom|autohaus|dealership",
+              "visitors_zero": True},
+}
+
+# --- item 7: OSM-only buildings on step 04's placeholder height (lib/gap_storeys.py; notebook 08 section 3.2b) ----------------
+# Where OSM gives neither a height nor building:levels, step 04 wrote 1 x 2.0 m (OSM_GAP_DEFAULT_FLOORS x OSM_GAP_FLOOR_HEIGHT_M),
+# a placeholder the 08b rule read as one storey - offices, schools and care homes alike (671 rows; Kindergarten 8.9 % of the
+# region sat on them). "The class-and-size median": such a building of a class that is storeyed by kind, below 2,500 m2 and under
+# no hall-like OSM outline, takes the median storeys of the ALKIS buildings of its class and footprint band that have a LoD2 eaves
+# height, no hall and no dwellings (with fewer than min_n of them, of every class in the band). It replaces the decided 08b mean
+# height for these rows; shops, restaurants, Kitas, the leisure classes and larger outlines keep one storey.
+# Alone against run 14: 206 rows rise to 2-3 storeys; Workers 1,524 (0.26 %), School 927, University 530 (1.38 %), Leisure 298
+# move; business +298, errands +674, meetup +251 a day.
+FLOOR_OSM_GAP_STOREYS = {
+    "mode": "band",                              # the median of the same class and footprint band; a thin cell: of every class
+    "placeholder_height_m": 2.0,                 # = OSM_GAP_DEFAULT_FLOORS x OSM_GAP_FLOOR_HEIGHT_M (step 04)
+    "placeholder_tol_m": 0.05,
+    "keep_one_classes": ["retail (small-scale)", "Retail", "restaurants / gastronomy"],   # one floor by the decided rule
+    "keep_one_tags": ["barn", "farm_auxiliary", "greenhouse", "shed", "roof", "carport", "cowshed", "stable", "riding_hall",
+                      "warehouse", "hangar"],    # item 2's hall outlines (FLOOR_ONE_STOREY_RULES hall_tags) + warehouse, hangar
+    "only_classes": ["normal office", "business-oriented services", "Services", "Public facilities", "schools", "universities",
+                     "research institutes", "hospitals", "nursing homes", "hotels"],
+    "max_area_m2": 2500,                         # outlines of 2,500 m2 or more keep one storey (often a hall and its office joined)
+    "bands_m2": [150, 400, 1000, 2500],          # < 150, 150-400, 400-1,000, 1,000-2,500, 2,500 m2 and more
+    "min_n": 30,                                 # reference buildings a class-and-band median needs
+}
+
+# --- item 11: the no-evidence residential rule and landuse areas (notebook 08 section 4.4) -----------------------------------
+# The colleague's no-evidence residential rule (2026-10-05) required no site at all, so 929 unnamed residential-coded buildings
+# escaped it through a commercial, retail or industrial landuse area around them - while the quarter weight (2026-10-06) already
+# reads such an area as no evidence. "Only with dwellings": the rule also takes a building whose only sites are landuse areas, if
+# it has dwellings by the residential context and is no plain home (plain homes keep their one storey with labels, 2026-10-05);
+# offices in business parks the residential context reads as offices keep their storeys. The rule's footprint x 1 keeps the
+# small-place cap (2026-10-06).
+# Alone against run 14: 460 buildings; Retail_Daily 6,229 (0.69 %), Retail_Non-Daily 728, Leisure 158 move; errands -2,269 a day.
+# The quarter weight for visitor values (item 8) was left as it is: it is a statement about shares, not about how many come.
+NO_EVIDENCE_LANDUSE = {"landuse_is_no_site": True, "keep_plain_homes": True, "needs_residential_context": True}
+
+# --- item 8: the visitor rates (lib/visitor_rates.py; notebook 08 section 7, the visitor values) -----------------------------
+# Every option applies a decided rate or zero as it was meant (2026-10-06):
+#   * sport_words: the sports type words are read for every sports class and before a generic or several-valued sports use, in
+#     the unit's own names and type (gyms at S_FITNESS, not the hall rate; riding, shooting and tennis halls at their own rates);
+#   * counter_cap: the counter rate covers at most the counter cap (388 m2), whatever gives it; the floor beyond takes the
+#     public-office rate (the AOK Braunschweig went from 1,915 to 514 errands a day);
+#   * office_box: a building or rest unit of an office or service class in a building over 5,000 m2 with eaves of at most 12 m
+#     counts business and errands on one storey (its footprint);
+#   * library: a university library counts 0 errands (its users are in the University total); research, specialist, archive and
+#     private libraries take the public-office rate instead of the public-library rate;
+#   * the leaks of the decided zeros are closed: the cafe zero wherever the gastronomy rate applies, company academies by their
+#     own words, no value in no zone, lessons at a school's sports hall count 0;
+#   * audience_zero: a leisure venue whose rate counts its whole audience (theatres, cinemas, clubs, event venues) keeps only the
+#     meetup value beyond its own Leisure share - the cafe zero for these venues as far as their Leisure share holds them;
+#     community arts centres keep it; sports at pools and bowling stays. Round 16 (2026-10-09, on the user's behalf): VISUM's
+#     Leisure (SG_6_FR~23) behaves like an attraction value with a resident base of about 70 per 1,000 inhabitants, and holds the
+#     venue audiences only in part (the Volkswagen Halle's zone 49 %, the Eintracht-Stadion's 35 % of their published visitors a
+#     day; nothing in SZ Lebenstedt 07, whose Leisure is 0). So such a venue keeps max(0, its meetup at the audience rate - its
+#     Leisure share) (net_of_leisure): at 60 of the 72 venues (73 units: the KP-ONE meadow has two) the Leisure share already
+#     holds it (0 as before), 11 get meetup back (+613 a day; the Kaptan Center and the Event Center Uemit Palace in Lebenstedt
+#     366 and 38, the Kaptan Center on its 7,329 m2 footprint at the assumed event rate); the KP-ONE festival meadow keeps 0
+#     (keep_zero_buildings: an open-air site used three days a year). Whether VISUM reads the five values as trips or as
+#     weights, and what FR~22 / FR~24 hold, is still to be asked;
+#   * events: event, conference and exhibition venues take the event rate, not the community-centre rate. With audience_zero,
+#     an event hall that carries leisure keeps only the meetup beyond its own Leisure share (round 16): the VW Halle and the
+#     Stadthallen 0, the CongressPark hall 7.8, the Kaptan Center 366.4.
+# Salzgitter's visitor values get a printed note: its OSM coverage of practices, offices and small shops is thin (round 16 below).
+# Alone against run 14 (values only, no category moves): business -2,211 (-5.1 %), errands -7,476 (-3.0 %), sports +4,434
+# (+3.7 %), meetup -6,775 (-15.6 %), lessons -1,008 (-6.4 %) a day.
+# Round 16 (2026-10-09, on the user's behalf):
+#   * the Salzgitter note says that its errands and sports values are probably too low, and Peine's nearly as much: OSM maps few
+#     practices and small shops in both (per inhabitant Salzgitter is the lowest district in sports and the second lowest in
+#     errands, after Peine; its business values are mid-range);
+#   * heritage_poi: a building whose only POI is a heritage feature (a castle, manor, monastery ...) takes its class rate unless
+#     it is filed as a culture or leisure facility: the POI names the building's past, not its use - the care home Schloss
+#     Schliestedt counted meetup 725.7 at the theatre rate (now 36.3 at the care-home rate), the Bundeslehranstalt Burg Warberg
+#     lessons 248.9 at the community rate (now 82.1). Alone against run 15: meetup -687, lessons -167 a day on 3 buildings.
+VISITOR_RULES = {
+    "sport_words": {
+        "generic_uses": frozenset({"sports_centre", "sports_hall", "multi", "multisport", "sport", "gymnastics", "athletics"}),
+        "words": [
+            (r"riding|equestrian|\breit|pferde", "S_RIDING"),
+            (r"shooting|sch[uü]tzen|schie(?:ß|ss)(?:stand|sport|halle|anlage|bahn|heim|verein)|archery|bogenschie", "S_SHOOT"),
+            (r"club ?house|clubheim|clubhaus|sportheim|sportlerheim|vereinsheim", "S_CLUB"),
+            (r"multi-?sport|several sports|soccer|football|fu(?:ß|ss)ball|badminton|handball|volleyball|basketball", "S_HALL"),
+            (r"swimming|\bpools?\b|hallenbad|freibad|schwimm|waldbad|stadtbad|sportbad|freizeitbad|erlebnisbad|badeland|badeanstalt"
+             r"|water ?park|\btherme|(?<!salzgitter-)(?<!salzgitter )\bbad\b(?!\s+(?:harzburg|gandersheim|lauterberg|grund|sachsa|helmstedt"
+             r"|salzdetfurth|bevensen|bodenteich|pyrmont|nenndorf))", "S_POOL"),
+            (r"(?<!table )(?<!tisch)tennis|padel|squash", "S_TENNIS"),
+            (r"fitness(?!\s*(?:/|and|&|\+|und)\s*wellness)|crossfit|kraftsport|bodybuilding|mcfit|injoy|clever ?fit|easy ?fitness|kieser"
+             r"|john reed|mrs\.? ?sporty", "S_FITNESS"),
+            (r"bowling|kegel|climbing|kletter|boulder|trampolin|laser ?tag|karting|kartbahn|go-?kart|indoor kart|minigolf|escape room"
+             r"|spielparadies|indoor play", "S_ENT"),
+            (r"\bdance|dancing|ballet|\btanz|martial arts|\bdojo|yoga|pilates|tai ?chi|qigong", "L_DANCE"),
+            (r"sports hall|gymnasium|turnhalle|sporthalle|sports centre|sports facility", "S_HALL"),
+        ],
+        "cmp_classes": ("fitness / wellness", "schools", "arenas, large events"),
+    },
+    "counter_cap": {"cap": 388.0, "beyond": "E_PUBOFF"},
+    "office_box": {"labels": ("business", "errands"),
+                   "classes": ("normal office", "open-plan office", "business-oriented services", "Services", "customer-oriented services",
+                               "customer service"),
+                   "min_footprint": 5000.0, "max_eaves": 12.0},
+    "library": {"university_classes": ("universities",), "classes": ("research institutes",),
+                "words": r"fachbibliothek|forschungs|research|archiv|archive|universit|campus|hochschul|wissenschaft",
+                "access": ("private", "no"), "rate": "E_PUBOFF", "university_zero": True},
+    "cafe_zero_by_rate": True,
+    "academy": {"words": r"acad|akadem|coaching|training|schulung|bildungszentrum|lehrwerkstatt|ausbildungszentrum",
+                "company": r"corporate|company|employee|staff|in-house|volkswagen|\bvw\b",
+                "classes": ("Industrial operations / Production", "highly productive industries / machine / material or space intensive")},
+    "no_zone_zero": True,
+    "school_hall": (r"school sports hall|schulsporthalle|(?:gym|sports) hall (?:of|at|for) (?:the |a |an )?[^|]{0,60}?(?:school|schule|gymnasium)"
+                    r"|sporthalle der (?:igs|kgs|[^|]{0,30}schule)|turnhalle der [^|]{0,30}schule|school gym"),
+    "audience_zero": {"labels": ("meetup",), "rates": ("M_CULTURE", "M_EVENTS"), "exclude_uses": ("arts_centre",),
+                      "net_of_leisure": True, "keep_zero_buildings": ("way/1463883217",)},    # round 16; the KP-ONE festival meadow
+    "events": {"uses": frozenset({"events_venue", "events_centre", "conference_centre", "exhibition_centre", "convention_centre"}),
+               "words": (r"\bevents? (?:venue|centre|center|hall|location)|eventhalle|event-?location|veranstaltungs(?:halle|zentrum|saal|stätte|ort)"
+                         r"|\bstadthalle|\bfesthalle|\bfestsa(?:al|le)|kongress|congress|convention (?:centre|center|hall)|conference (?:centre|center|hall)"
+                         r"|tagungs(?:zentrum|stätte|haus)|mehrzweckhalle|multi-?purpose (?:hall|events? venue)|exhibition (?:hall|centre|center)|messehalle"
+                         r"|konzerthalle|concert hall|kulturhalle"),
+               "word_groups": (None, "community", "generic", "unmapped", "industry", "small_retail", "sport", "office", "public_office"),
+               "not_words": r"dorfgemeinschaft|village community|gemeinschaftshaus|gemeindesaal|gmdsaal|gemeindehaus|b[uü]rgerhaus|community house"},
+    "lower_bound_note": {"district": "Salzgitter", "ags_prefix": "03102"},
+    "heritage_poi": {"uses": ("castle", "manor", "palace", "monastery", "ruins", "fort", "city_gate", "tower", "monument", "memorial",
+                              "castle_wall"),
+                     "keep_classes": ("entertainment, culture", "Facilities for culture, leisure and sports")},
+}
+
+# --- item 9: the sizes of POI units (notebook 08 sections 4.4d, 4.5 and 4.7) -------------------------------------------------
+# A POI mapped as a point counts about 1 m2 in the step-04.5 shares next to a polygon (862 POI units held less than 5 m2: mall
+# tenants, a cinema, the Leis food wholesaler with 0.6 m2). The rules use the statistic the decided point caps use, the mapped
+# polygons of each POI group (a quantile, groups with at least POINT_SIZE_CAP_MIN_POLYGONS polygons, else all polygons):
+#   * point_min_quantile: a point counts at least its group's median polygon (at most an equal share and the footprint) in its
+#     building's shares - not a point that repeats a polygon of its building by name or use;
+#   * tenant points outside the shopping and outlet centres get the point cap and are never the main occupant (the KFZ-Zulassung
+#     Gifhorn took 18,447 m2);
+#   * mall_quantile: in a mall, the tenant points' shares are weighted by their group's typical size (a supermarket about six
+#     small shops, not one);
+#   * pharmacy_cap_m2: a pharmacy occupies at most 307 m2, the p90 of the mapped pharmacy polygons smaller than their building
+#     (5 of them); round 16 checked it on all 33 mapped pharmacy polygons (p90 304 m2) and kept it (UNIT_SIZE_FORMATS: the
+#     easyApotheke format up to 400 m2);
+#   * chain_cap_group: a building filed as a small shop or restaurant whose own data name a big-box chain (the chain list of the
+#     one-storey rule) occupies at most the big-box cap instead of the small-shop cap;
+#   * canopy_cap_group: a canopy without a station shop (it keeps its unit) occupies at most the fuel group's cap.
+# Alone against run 14: 1,134 POI units resized; Retail_Daily 24,206 (2.66 %), Retail_Non-Daily 11,903 (1.53 %), Leisure 4,646
+# (2.08 %), Workers 2,269, University 352 move; errands +2,660 a day. Stations of two buildings stay as they are (at most 45
+# Retail_Daily counted twice).
+UNIT_SIZE_RULES = {"point_min_quantile": 0.5, "mall_quantile": 0.5, "pharmacy_cap_m2": 307.0, "chain_cap_group": "big_box",
+                   "canopy_cap_group": "fuel"}
+
+# --- item 10: the Workers-0 rules and the Workers factors (notebook 08 sections 4 and 4.4) ------------------------------------
+# Alone against run 14: Workers 10,368 (1.75 %) move - 21 office buildings, 31 more volunteer stations, 37 parking garages.
+# The decided Workers-0 rules (2026-10-05) reach the places their own tests describe:
+#   * fitness / wellness halls and clubhouses get the sports-hall rule; staffed fitness and wellness places keep their Workers;
+SPORTS_HALL_CLASSES = SPORTS_HALL_CLASSES | {"fitness / wellness"}
+SPORTS_HALL_KEEP_PATTERN = SPORTS_HALL_KEEP_PATTERN + (
+    r"|\bgym\b(?!\s*halls?\b)|fitness|crossfit|wellness|\bspa\b|sauna|therap|\bhealth\b|gesundheit|genesung|convalescen"
+    r"|erholungsheim|kurheim|schwefelbad|physio|rehab|yoga|pilates|\bstudios?\b|bildungsst|training cent(?:re|er)")
+#   * a worship building the storey rules count as one (ALKIS worship codes or a worship head) is a church too, unless its head
+#     names a shop, a store, an administration or a children's group; and a worship POI gets Workers 0 in any building without a
+#     rule (a mosque in a shop building);
+CHURCH_FLAG_EXCLUDE_PATTERN = r"\bshops?\b|\bstores?\b|administrat|\bchildren"
+#   * a fire station in the three cities is a volunteer station where the volunteer word (or FF) stands in its name, full type,
+#     POI names, OSM twin name or its own POIs' names and operators, not only in the head - except the station that is its zone's
+#     only Workers carrier (BS Stiddien: the guard would put its Workers on the church instead);
+VOLUNTEER_FIRE_OWN_TEXT_PATTERN = VOLUNTEER_FIRE_CITY_PATTERN + r"|\bff\b"
+#   * a parking garage or deck (its head names one and no other use, no occupant POI) gets Workers 0 on its own units;
+PARKING_OTHER_USE_PATTERN = (r"shop|store|retail|supermarket|market|restaurant|fast[- ]food|imbiss|caf[eé]|\bbars?\b|\bpubs?\b|nightclub|club|fitness"
+                             r"|\bgym\b|offices?\b|administrat|community|cent(?:re|er)|venue|hotel|school|kiosk|cinema|workshop|warehouse|hall\b")
+#   * a building of an industry, yard or transport class whose head names a whole office building (the residential context's
+#     office pattern) and no hall, works, production or storage word takes the normal-office factor (the Salzgitter AG
+#     headquarters), on its own units; an industry POI that only repeats the building's OSM outline takes the building's factor.
+OFFICE_IN_INDUSTRY_EXCLUDE_PATTERN = (r"\bworks\b|production|manufactur|factory|warehouse|storage|depot|\bhalls?\b|workshop|fabrication|sorting"
+                                      r"|printing|\bkaue\b|washroom|garage|vehicle base|operations|control|weighbridge")
+
+# --- the leftovers ------------------------------------------------------------------------------------------------------------
+# (a) four big halls the model filed as shops or restaurants take the class of what they are (item 2's "Leave for a class fix");
+# round 17 (2026-10-09, on the user's behalf): so do the 23 big low boxes typed 'office' that the web and OSM check found to be
+# halls (FLOOR_OFFICE_BOX['hall_ids']) - their Workers factor and visitor rates follow the class:
+CLASS_FIX_BUILDINGS = {"DENIAL840000thNC": "car dealerships",                                                  # Anssems trailer megastore
+                       "DENIAL0100001rQ5": "highly productive industries / machine / material or space intensive",   # VW Halle 31
+                       "DENIAL0500009I8A": "Industrial operations / Production",                               # works hall, tankpool24 pump
+                       "DENIAL6100001enN": "wholesale",                                                         # Stanze Stahl, steel stockholder
+                       "DENIAL0100001rBq": "Industrial operations / Production",  # Grotrian-Steinweg piano factory
+                       "DENIAL0100001rJN": "Industrial operations / Production",  # U.P.R. Fensterwerk
+                       "DENIAL0100002Q8e": "Industrial operations / Production",  # Richard Bretschneider GmbH
+                       "DENIAL0100002QkY": "Industrial operations / Production",  # Bretschneider / Streiff
+                       "DENIAL6100002cXn": "Industrial operations / Production",  # Pelikan PBS Produktion
+                       "DENIAL6100002dpv": "Industrial operations / Production",  # HoffmannGlas
+                       "DENIAL8400003zjW": "Industrial operations / Production",  # Gebrueder Mayer Produktions- und Vertriebs GmbH
+                       "DENIAL910000boZB": "Industrial operations / Production",  # EDAG development centre Birnbaumstuecke 5
+                       "DENIAL01000051fb": "highly productive industries / machine / material or space intensive",  # Oettinger brewery Braunschweig
+                       "DENIAL84000038p8": "highly productive industries / machine / material or space intensive",  # concrete works
+                       "DENIAL0100000U6B": "Yards, depots, storage areas, construction yards",  # Gewerbepark Braunschweig
+                       "DENIAL0100000zvs": "Yards, depots, storage areas, construction yards",  # Hch. Perschmann logistics centre
+                       "DENIAL0100001rUj": "Yards, depots, storage areas, construction yards",  # Streiff & Helmold
+                       "DENIAL0100001s0j": "Yards, depots, storage areas, construction yards",  # Streiff & Helmold
+                       "DENIAL0100003emH": "Yards, depots, storage areas, construction yards",  # DHL Supply Chain / DHL Fulfilment GmbH
+                       "DENIAL91000005r7": "Yards, depots, storage areas, construction yards",  # Schnellecke logistics site
+                       "DENIAL0500000aE6": "Yards, depots, storage areas, construction yards",  # RS Rock-Service
+                       "DENIAL0500003lrZ": "Yards, depots, storage areas, construction yards",  # Wilhelm Fromme Landhandel
+                       "DENIAL610000389G": "Yards, depots, storage areas, construction yards",  # Albert Elligsen
+                       "DENIAL610000eeRp": "Yards, depots, storage areas, construction yards",  # Albert Elligsen
+                       "DENIAL0100001rUe": "wholesale",  # Fleischer-Dienst Braunschweig eG
+                       "DENIAL0100004xHx": "car dealerships",  # Voets Autozentrum
+                       "DENIAL6100006BBQ": "furniture stores"}   # REPO-Moebelmarkt
+# (b) the open education cases, by the web check: keep the Ostfalia 'D Rechenzentrum' (PC pools, University) and the
+# SOS-Muetterzentrum Salzgitter (it runs a Kita; weighed at most the childcare cap); St. Annen stays dropped (a parish house; the
+# Kita St. Annen is another building); drop School on three CJD Jugenddorf Wolfsburg buildings without a school function and on
+# the Bornhausen sports hall (Seesen 06).
+EDU_CARRIER_LISTS = {"keep": ("DENIAL0600001Aip", "DENIAL0500003D8P"),
+                     "drop": (("DENIAL9100005JTe", "school", "School"), ("DENIAL9100005KOs", "school", "School"),
+                              ("DENIAL9100005LSg", "school", "School"), ("DENIAL03000026gY", "school", "School")),
+                     "kita_cap": ("DENIAL0500003D8P",)}
+# (c) the near-zero Workers rule stays as it is (a cap would only push the excess onto the over-full givers).
+# (d) buildings that no longer stand: ALKIS (survey 2017/18) still holds them, while OSM shows a construction or brownfield site
+# or other buildings there; they give no unit, like a vacant place. Buildings on a site named after an active occupant (Peiner
+# Traeger, VW, DLR, the TU campus, the Klinikum, schools) are kept as stand-ins for what is rebuilt there.
+GONE_BUILDINGS = frozenset({
+    "DENIAL0100000zG3", "DENIAL0100001dUx", "DENIAL0100001dVI", "DENIAL0100001e2b", "DENIAL0100001e2c", "DENIAL0100001ec9",
+    "DENIAL0100001ecd", "DENIAL0100001ech", "DENIAL0100001ekP", "DENIAL0100001rUc", "DENIAL0100003vPI", "DENIAL0100005WM9",
+    "DENIAL0100005WvF", "DENIAL0100005XmC", "DENIAL0100005XoG", "DENIAL0100005xR5", "DENIAL0100005xSD", "DENIAL0100005xTd",
+    "DENIAL0100005xZM", "DENIAL0100005ylW", "DENIAL0300001F9D", "DENIAL0300001FM7", "DENIAL0300001FRI", "DENIAL0300001FTE",
+    "DENIAL0300001FuT", "DENIAL0300001G2s", "DENIAL03000046tb", "DENIAL030000478s", "DENIAL03000047YZ", "DENIAL0300005NcP",
+    "DENIAL0300006XCM", "DENIAL0300008GwR", "DENIAL030000a6X8", "DENIAL030000a7ek", "DENIAL030000a7mD", "DENIAL0500000MSw",
+    "DENIAL0500000MU6", "DENIAL0500000MVx", "DENIAL0500000MXR", "DENIAL0500000MXd", "DENIAL0500000MZB", "DENIAL0500000MZI",
+    "DENIAL0500000N0K", "DENIAL0500000N1U", "DENIAL0500000N2Q", "DENIAL0500000N44", "DENIAL0500000N51", "DENIAL0500000N5s",
+    "DENIAL0500000N68", "DENIAL0500003DGK", "DENIAL0600001Bto", "DENIAL0600001BzY", "DENIAL6100001c0z", "DENIAL6100002cG0",
+    "DENIAL61000038c7", "DENIAL61000047Eg", "DENIAL8400004qvV", "DENIAL8400006cQm", "DENIAL8400009tAR", "DENIAL840000aNQs",
+    "DENIAL9100001C7g", "DENIAL9100005JOF", "DENIAL9100005KMp", "DENIAL9100005KjS", "DENIAL9100005KnU", "DENIAL9100005LSI",
+    "DENIAL9100005LZG", "DENIAL9100005MQ2", "DENIAL9100006RH8", "DENIAL9100007WUa", "DENIAL910000acWi", "DENIAL910000acWl",
+    "DENIAL910000ahdn", "DENIAL910000aheH", "DENIAL910000al0j", "DENIAL910000b4Xh", "DENIAL910000btNP", "DENIAL910000btNR"})
+# All together against run 14: Workers 15,835 (2.68 %), School 1,257 (0.84 %), University 1,116 (2.92 %), Kindergarten 43,
+# Retail_Daily 37,499 (4.13 %), Retail_Non-Daily 13,138 (1.69 %) and Leisure 6,797 (3.05 %) move; the visitor values: business
+# -1,914 (-4.4 %), errands -6,363 (-2.5 %), sports +2,928 (+2.5 %), meetup -6,653 (-15.4 %), lessons -760 (-4.8 %) a day; the
+# last-carrier guard restores 55 rows (27 in run 14).
+
+
+# --- round 16: the things still odd after run 15 (the user, 2026-10-09: "make the changes for the things you mentioned are still
+# weird or not right"; every choice below is the recommended option of the analysis, taken on the user's behalf) ---------------
+# The file also shows, next to the model's labels, the labels the rules use (labels_used on buildings, poi_labels_used on POIs;
+# notebook 08 section 7). The staff shops are a key of STAFF_CATERING_RULES ('shops'); the meetup netting and the heritage POIs are
+# keys of VISITOR_RULES ('audience_zero', 'heritage_poi').
+
+# --- big low office and service boxes (notebook 08 section 3.4) ---------------------------------------------------------------
+# 30 buildings of the office and service classes with a footprint over 5,000 m2 and eaves of at most 12 m counted 2-3 storeys from
+# the height alone (6,686 Workers). Nearly all are halls the model typed 'office building' from the generic ALKIS function of an
+# industrial estate: a car-dealer site, a packaging plant, Pelikan's factory, glass production, potato stores, logistics (web and
+# OSM checks); item 8b already counts their business and errands on one storey. "The 8b box": such a building counts one storey
+# where only the height gave more (no OSM levels, no structure rule, no dwellings, no POI upstairs), unless its own data say office
+# floors - OSM outlines with building:levels over at least half of the footprint averaging 1.5 levels or more, an OSM
+# building=office outline over at least half of it, or a type that names several floors. It joins the one-storey rules of
+# 2026-10-08 after them (the sport boxes of round 17 follow it); 8b's value rule stays (it still acts on two of the four boxes this rule exempts: DENIAL0100001dYC,
+# business 126.5, and the XXXLutz DENIAL0100000zPs, errands 219.4).
+# Alone against run 15: 26 buildings drop to one storey (4 keep theirs on OSM levels); Workers 2,685 (0.45 %) move, nothing else.
+# Round 17 (2026-10-09, on the user's behalf; the user: "Office buildings are usually like normal apartments and therefore they
+# have multiple floors - why would you want to apply one storey rule to them?"): the rule hit no office building. The region's
+# ALKIS gives every business building a generic function (2000 / 2010 / 2100; not one building carries 2020 Buerogebaeude), the
+# model read 'office building' into it, and the firms' own office buildings at these sites are separate buildings that keep their
+# storeys; the web and OSM check of all 30 boxes found 23 halls (factories, logistics and storage halls, a meat wholesaler, a
+# dealer workshop, a brewery hall, a furniture market), 2 unknown boxes, 1 building that no longer stands and the 4 multi-floor
+# buildings the rule already left alone (OSM levels or office outlines). A box now counts one
+# storey only with hall evidence: on the list of the checked halls ('hall_ids', with the evidence) or under a hall-type OSM outline
+# over at least half of its footprint ('hall_tags'); offices and unknown boxes keep the height storeys (DENIAL0100001rQO,
+# Grotrian-Steinweg-Str. 10, and DENIAL9100002sk2, VW Nutzfahrzeuge Heinenkamp 20, go back to 2). The box is read on the model's
+# class (class_06), so a listed hall keeps its one storey after its class fix (CLASS_FIX_BUILDINGS: the 23 take the class of what
+# they are, and rule 4.0 leaves the class-fix list alone). 8b's value rule stays (it still damps the XXXLutz part and
+# DENIAL0100001dYC). Alone against run 16: Workers 1,545 (0.26 %) move and business -984 a day on 9 halls; nothing else.
+FLOOR_OFFICE_BOX = {
+    "classes": ["normal office", "open-plan office", "business-oriented services", "Services", "customer-oriented services",
+                "customer service"],             # = VISITOR_RULES['office_box']['classes']
+    "min_footprint_m2": 5000.0,                  # = VISITOR_RULES['office_box']['min_footprint']
+    "max_eaves_m": 12.0,                         # = VISITOR_RULES['office_box']['max_eaves']; the mean height where no eaves height
+    "osm_min_cover": 0.5,                        # OSM outlines with building:levels over at least half of the footprint ...
+    "osm_min_levels": 1.5,                       # ... averaging 1.5 levels or more say several floors
+    "office_tags": ["office"],                   # an OSM building=office outline over at least half of the footprint
+    "floors_pattern": (r"multi[- ]?stor(?:e)?y|\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)[- ]?(?:stor(?:e)?y|stories|storeys"
+                       r"|floors?|levels?)\b|\bstoreys\b|\bstories\b|\bupper floors?\b|\bupstairs\b|high[- ]rise|hochhaus|\btower\b"
+                       r"|office block|office tower"),   # a type that names several floors
+    "hall_ids": {                                # the halls the web and OSM check confirmed (2026-10-09), with the evidence
+        "DENIAL0100000U6B": ("Gewerbepark Braunschweig, Steinriedendamm 15, Halle 22 (OSM 'Gebaeude 22'): 10,000 m2 hall + 1,200 "
+                             "m2 ancillary incl. 934 m2 office, under conversion, let from 06/2027 (mileway.com)"),
+        "DENIAL0100000zvs": ("Hch. Perschmann logistics centre, Hauptstrasse 46d, BS-Wenden (regionalheute.de 2019-07-24; "
+                             "klinkhammer.com 2021)"),
+        "DENIAL0100001rBq": ("Grotrian-Steinweg piano factory, Grotrian-Steinweg-Str. 2 (OSM way/22950062 "
+                             "disused:building=commercial; insolvent 2024, production ended 2025)"),
+        "DENIAL0100001rJN": ("U.P.R. Fensterwerk, window production, Christian-Pommer-Str. 51 (OSM 'U.P.R.'; production job ad "
+                             "2025)"),
+        "DENIAL0100001rUe": ("Fleischer-Dienst Braunschweig eG, meat and butcher-supply wholesaler, Christian-Pommer-Str. 31/33 "
+                             "(OSM building=industrial; council paper 2024)"),
+        "DENIAL0100001rUj": ("Streiff & Helmold, packaging and fulfilment, Carl-Giesecke-Str. 2 (one OSM outline with s0j; 20,000 "
+                             "m2 storage)"),
+        "DENIAL0100001s0j": "Streiff & Helmold, packaging and fulfilment, Carl-Giesecke-Str. 2 (OSM office=company POI on it)",
+        "DENIAL0100002Q8e": ("Richard Bretschneider GmbH (Streiff group), folding boxes and printing, Pippelweg 43 (imprint; ~240 "
+                             "staff)"),
+        "DENIAL0100002QkY": ("Bretschneider / Streiff, Pippelweg 44 (directory: SF Streiff Freizeit); 80 % one 5.2 m hall part "
+                             "(LoD2)"),
+        "DENIAL0100003emH": "DHL Supply Chain / DHL Fulfilment GmbH, Marienberger Str. 10 (OSM name 'DHL'; yelp, 11880)",
+        "DENIAL0100004xHx": ("Voets Autozentrum, VW commercial-vehicle centre, Alte Leipziger Str. 123 (OSM landuse 'Voets "
+                             "Autozentrum')"),
+        "DENIAL01000051fb": ("Oettinger brewery Braunschweig (ex Feldschloesschen), Boecklerstrasse 31: a hall of the brewery "
+                             "complex; production ended 2025/26 (tageskarte.io, lebensmittelpraxis.de)"),
+        "DENIAL0500000aE6": ("RS Rock-Service (event sound and light rental), Am Bahnhof 15 / Thiederhall 40, SZ-Thiede (OSM POI; "
+                             "openpr 2010)"),
+        "DENIAL0500003lrZ": ("Wilhelm Fromme Landhandel (grain and oilseed trade), Lindenstrasse 21/23, SZ-Ringelheim; OSM silo "
+                             "15 m away"),
+        "DENIAL6100002cXn": ("Pelikan PBS Produktion, writing-instrument plant Peine-Voehrum (OSM office=company outline; ~230 "
+                             "staff)"),
+        "DENIAL6100002dpv": ("HoffmannGlas, insulating-glass production, main site Peine (OSM office=company outline; a-w.com "
+                             "report)"),
+        "DENIAL610000389G": ("Albert Elligsen, potato and onion storage and trade, Peine-Stederdorf (OSM office=company outline; "
+                             "potatopro)"),
+        "DENIAL610000eeRp": ("Albert Elligsen, potato and onion storage and trade, Peine-Stederdorf (OSM office=company outline; "
+                             "potatopro)"),
+        "DENIAL6100006BBQ": ("REPO-Moebelmarkt (Rest- und Sonderposten), Gerhard-Lukas-Str. 43, Ilsede (OSM node 6710466935; "
+                             "opening hours on the outline way/314164849)"),
+        "DENIAL84000038p8": ("concrete works, Gifhorner Str. 65, Wesendorf (OSM node 'Berding Betonwerk'; directory: Frischbeton "
+                             "Uelzen)"),
+        "DENIAL8400003zjW": ("Gebrueder Mayer Produktions- und Vertriebs GmbH (Mayflor potting soil), Mayflorstrasse 1-3, "
+                             "Wahrenholz"),
+        "DENIAL91000005r7": ("Schnellecke logistics site, Hafenstrasse, WOB-Fallersleben (OSM site 'Schnellecke'; offices in "
+                             "other buildings)"),
+        "DENIAL910000boZB": ("EDAG development centre Birnbaumstuecke 5, WOB-Warmenau: OSM building=industrial 'EDAG'; 10,000 m2 "
+                             "factory space (EDAG); offices in the 3-4 storey buildings DENIAL910000boZt / boZx")
+    },
+    "hall_tags": ["industrial", "warehouse", "manufacture", "hangar"],   # a hall-type OSM outline over at least osm_min_cover of the footprint
+}
+
+# --- the sizes of single tenants by format (lib/unit_sizes.py; notebook 08 sections 4.4d and 4.5) ----------------------------
+# A second look at item 9 (run 15), where one statistic per POI group sized every tenant:
+#   * pharmacy_large: the pharmacy cap of 307 m2 stays - the p90 of the 5 mapped pharmacy polygons smaller than their building;
+#     of all 33 mapped pharmacy polygons p90 304 m2, median 196 m2 (ApBetrO section 4(2): at least 110 m2 of operating rooms) -,
+#     but the easyApotheke format keeps up to 400 m2: its stores have an Offizin of 100-400 m2 (apotheke adhoc 2013-2015,
+#     zm-online 2014);
+#   * chain_caps: a chain filed as a small shop occupies at most its format's size, not the one big-box cap of 4,774 m2 (which
+#     gave a Fressnapf 2,796 m2 and a Rossmann the ground floor of a residential block): drugstores the p90 of the 20 mapped dm /
+#     Rossmann polygons (1,103 m2; dm's average store 627-638 m2), pet stores the Fressnapf XXL format (about 1,500 m2), beverage
+#     stores the p90 of the 33 mapped polygons named for a beverage chain or 'Getraenke...' (1,487 m2; 1,413 m2 without the
+#     4,843 m2 polygon of a beverage and egg trader in no building), textile and shoe discounters the decided small-shop cap
+#     (KiK 400-750, Takko 400-500, NKD 300-450 m2); a chain in no listed format keeps the big-box cap;
+#   * counters: a counter or kiosk point (kiosk, newsagent, tobacco, lottery, e-cigarette, ticket and post-office uses, a 'Theke'
+#     name) counts at least the median of the 31 mapped kiosk polygons (53.4 m2) in its building's shares, not its group's median
+#     (178 m2 for small shops: the kiosk in a library cafe took 124 Retail_Daily), and weighs that median in a mall too; the
+#     shared ground floor and a listed mall's factor can still leave it lower (as any point minimum);
+#   * mall_chains: a mall tenant point whose name or brand is a listed chain weighs its published typical size (sales area;
+#     MediaMarkt 2,500 m2, Thalia 400 m2, Kaufland 5,000 m2 ...) instead of its group's median, and counts at least that size in
+#     its building's shares (bounded like the point minimum: an equal share of the floor, the footprint; in a listed mall the
+#     factor of 4.5b then scales it with the other retail units). The weights act only in the malls whose retail floor is
+#     published (MALL_RETAIL_FLOOR): in a mall that still counts its gross floor a chain would take most of it (a Mueller
+#     drugstore 10,384 m2); the minimum acts in every mall (Primark and Decathlon in the City-Point Braunschweig). The list has no
+#     food chains: a food anchor in a listed mall keeps the food-store weight (1,109 m2), so a listed non-food chain can outweigh
+#     it (Forum Wolfenbuettel: Expert 2,777 m2, Rewe 2,054 m2; City-Galerie: MediaMarkt 5,031 m2, REWE 2,232 m2); no published
+#     size of these stores was found.
+# Alone against run 15 (each): the large pharmacies Retail_Daily 337, Workers 22; the chain caps Retail_Daily 464, Retail_Non-Daily
+# 447, Workers 55, Leisure 3, lessons -1 a day; the counters Retail_Daily 881, Retail_Non-Daily 268, Leisure 42, Workers 25,
+# errands -46 and sports +6 a day; the mall chains (with the mall floors below) the split inside the 7 listed malls.
+UNIT_SIZE_FORMATS = {
+    "pharmacy_large": {"pattern": r"\beasy\s*-?\s*apotheke", "cap_m2": 400.0},
+    "chain_caps": [                              # (the chain word the box-chain list found, the format's cap in m2); the first match
+        (r"^(?:dm|rossmann)$", 1103.0),
+        (r"^(?:fressnapf|futterhaus|zoo ?& ?co\.?|kiebitzmarkt)$", 1500.0),
+        (r"^(?:hol['’]?ab|holab|trinkgut|getr[aä]nke\w*|fristo|big durst)$", 1487.0),
+        (r"^(?:kik|takko\w*|nkd|ernsting'?s\w*|jeans fritz|reno)$", 748.0),
+    ],
+    "counters": {"uses": ["kiosk", "kiosk;ticket", "newsagent", "tobacco", "lottery", "e-cigarette", "ticket", "post_office"],
+                 "name_pattern": r"(?:fleisch(?:er)?|wurst|k[aä]se|fisch|feinkost)theke|\btheke\b",
+                 "groups": ["small_retail", "counter"],
+                 "kiosk_uses": ["kiosk", "newsagent", "tobacco", "lottery"],     # the mapped polygons the kiosk median is taken of
+                 "mall": True},                                                  # in a mall, a counter weighs the kiosk median too
+    "mall_chains": [                             # (name or brand, the published typical size in m2, the POI uses it must have or None)
+        (r"^primark\b", 6400.0, None),                          # Braunschweig store, five floors (Textilwirtschaft / FashionUnited)
+        (r"^kaufland\b", 5000.0, None),                         # Frankfurt-Fechenheim 5,300; Bad Saulgau 4,500; EHI: from 5,000
+        (r"^decathlon\b", 2885.0, None),                        # the Braunschweig store as planned (Textilwirtschaft 2018)
+        (r"^(?:media\s?markt|saturn)\b", 2500.0, None),         # a German average above 2,400 (the 800 m2 Berlin Hbf store < a third)
+        (r"^adler\b", 2200.0, ["clothes"]),                     # Adler expansion: from 2,000 m2 + about 200 m2 side rooms
+        (r"^c\s?&\s?a\b", 2000.0, None),                        # 780,000 m2 / about 390 stores; JLL: 2,500 m2 per mall site
+        (r"^expert\b", 1500.0, ["electronics", "computer", "mobile_phone", "hifi", "appliance", "electrical"]),  # full range from 800 (GfK)
+        (r"^m[uü]ller$", 1422.0, ["chemist", "variety_store", "department_store", "toys", "perfumery"]),  # German average 2023/24
+        (r"^woolworth\b", 1250.0, None),                        # 500-2,000 m2 + 100-200 m2 side rooms (brochure 2020)
+        (r"^(?:jysk|d[aä]nisches bettenlager)\b", 950.0, None), # Store Concept 3.0: 950 m2 + 250 m2 storage (JYSK 2025)
+        (r"^action$", 900.0, ["variety_store"]),                # average 850-1,000 m2 (FIM 2024)
+        (r"^trinkgut\b", 850.0, None),                          # new stores 700-1,100 m2 (EDEKA press releases 2022-2026)
+        (r"^tedi\b", 700.0, None),                              # from 650 m2 + about 50 m2 side rooms (TEDi flyer 2024)
+        (r"^dm(?:[- ]drogerie ?markt|[- ]markt)?$", 630.0, ["chemist"]),   # dm average 627-638 m2
+        (r"^rossmann\b", 600.0, None),                          # average 600 m2 (2021)
+        (r"^kik$", 575.0, None),                                # 400-750 m2 (KiK expansion)
+        (r"^deichmann\b", 500.0, None),                         # from 500 m2, at least 430 m2 of sales area
+        (r"^takko\b", 450.0, None),                             # 400-500 m2
+        (r"^thalia\b", 400.0, ["books", "stationery"]),         # regular stores 250-565 m2; the BraWo Carree store 367 m2
+        (r"^nkd$", 375.0, None),                                # 300-450 m2
+    ],
+}
+
+# --- the floor of the malls (notebook 08 section 4.5b) --------------------------------------------------------------------------
+# A mall's units shared its whole floor area - footprint x storeys, car parks and aisles included: the BraWo Carree counted
+# 55,652 m2 against 17,345 m2 published, the seven malls below 284,712 m2 against 149,099 m2. "The published retail floor": the
+# shops, restaurants and services of a listed mall occupy at most its published retail floor (one factor for all of them, never
+# above 1); its non-retail tenants keep their floor (MALL_NONRETAIL_GROUPS: the castle's library, archive and museum in the
+# Schloss-Arkaden, the outlet's Kita); a POI that is the mall's own outline (a generic POI tagged as the building: BraWoPark's
+# way/229497782, the only one in the seven) stands for the shops OSM does not map and keeps only the published floor its tenants
+# leave (13,238 m2 of 18,500; its 18 tenants keep their sizes - found by the review of run 16); the rest of its floor - car
+# parks, aisles, plant, delivery - carries nothing, a Workers remainder included (as the cut floor of the decided small-place
+# cap). The storeys stay as decided. Malls without a published figure keep their floor (no ratio: their upper floors are partly
+# real sales levels). An unlisted mall next to a listed one gains: the KLL DENIAL9100005KLL in Wolfsburg (Mueller, Naehcenter,
+# H&M, an Irish pub, in an ALKIS residential building) keeps its 13,692 m2 and holds 34 % of WOB Stadtmitte 5's Retail_Daily
+# and Leisure (run 15: 27 %, 26 %); no published floor was found.
+# Alone against run 15: Workers 1,099 (0.19 %), Retail_Daily 3,583 (0.39 %), Retail_Non-Daily 6,564 (0.84 %), Leisure 331
+# (0.15 %) move; errands -180 a day (the 8 remainder units of the outlet centre, 4,074 m2 with 50 Workers in run 15, are cut).
+MALL_NONRETAIL_GROUPS = frozenset({
+    "office", "public_office", "health_practice", "hotel", "school", "small_school", "childcare", "care_home", "hospital", "sport",
+    "community", "worship", "culture", "transport", "industry", "fire_rescue", "vehicle"})
+MALL_RETAIL_FLOOR = {
+    "Schloss-Arkaden Braunschweig": {"ids": ["DENIAL0100005xF6"], "m2": 41754},
+    # sales area 34,491 m2 + 7,263 m2 rentable ancillary space (de.wikipedia.org, Braunschweiger Schloss; ECE: 30,000 m2 sales
+    # area, 150 shops); the city rents 13,300 m2 of the castle for its library, archive and museum; car park 1,250 spaces
+    "BraWo Carree (City Carree) Salzgitter": {"ids": ["DENIAL0500001k0e"], "m2": 17345},
+    # a 17,345 sqm food-anchored centre (CRE Herald 2020-06-11); 17,000 m2 of retail plus about 600 parking spaces (PropertyEU
+    # 2017-06-01); 570 covered spaces (bahnhof.de)
+    "City-Galerie Wolfsburg": {"ids": ["DENIAL9100005MxH"], "m2": 30800},
+    # leasable space about 30,800 m2, about 100 shops, about 800 parking spaces (Deutsche EuroShop); ECE: 20,000 m2 sales area
+    "BraWoPark Shopping Center Braunschweig": {"ids": ["DENIAL010000dM1V"], "m2": 18500},
+    # 18,500 m2, of it 12,510 m2 sales area and 3,000 m2 gastronomy and services; a car park with 1,300 spaces plus 540 open-air
+    # spaces (Volksbank BraWo press release 2013-10-29)
+    "Forum Wolfenbuettel": {"ids": ["DENIAL0600001A0Y"], "m2": 12000},
+    # about 12,000 m2, opened August 1998 (oeffnungszeitenbuch.de - a directory, the measure is not stated; the weakest entry);
+    # 420-480 spaces on an open lot
+    "City Galerie Peine": {"ids": ["DENIAL610000ghYP"], "m2": 6700},
+    # net area 6,700 m2, 20 shop units on two floors (TextilWirtschaft 2009-04-03)
+    "Designer Outlets Wolfsburg": {"ids": ["DENIAL9100005JA1", "DENIAL9100005JVD", "DENIAL9100005K3A", "DENIAL9100005KEa",
+                                           "DENIAL9100005Khx", "DENIAL9100005KiL", "DENIAL9100005Kyv", "DENIAL9100005LBT",
+                                           "DENIAL9100005LS7", "DENIAL9100005M9G", "DENIAL9100005MBi", "DENIAL9100005MOt",
+                                           "DENIAL9100005MWY", "DENIAL9100005MYk", "DENIAL9100005Mc5", "DENIAL9100005Na6",
+                                           "DENIAL910000bl3U", "DENIAL910000bl4i", "DENIAL910000bl4t", "way/661160910",
+                                           "way/793836100", "way/793836101", "way/793836102", "way/793836103", "way/793836104",
+                                           "way/793836105", "way/793836107", "way/793836108", "way/793875070"], "m2": 22000},
+    # sales area 11,500 -> 17,500 m2 with phase 2 (TextilWirtschaft 2013-11-27) and about 4,500 m2 rentable in phase 3 (opened
+    # 2018); Europa Capital: more than 22,000 m2 GLA and 100 stores when built out
+}
+# All together against run 15 (round 16): Workers 3,892 (0.66 %), Retail_Daily 5,855 (0.64 %), Retail_Non-Daily 6,621 (0.85 %)
+# and Leisure 509 (0.23 %) move, School, University and Kindergarten nothing; the visitor values: errands -486 (-0.20 %), sports
+# +6, meetup -74 (-0.20 %: +613 from the netting, -687 from the heritage POIs), lessons -168 (-1.11 %) a day, business
+# unchanged; 1,085 buildings move by more than 1; the last-carrier guard restores the same 55 rows.
+
+
+# --- round 17: the user's points on run 16 (2026-10-09: "the idea is we get as close as possible to real world"; every choice
+# below is the recommended option of the round-17 analysis, taken on the user's behalf) ----------------------------------------
+# The big low office boxes count one storey only with hall evidence and the 23 checked halls take the class of what they are
+# (FLOOR_OFFICE_BOX, CLASS_FIX_BUILDINGS above); the OSM signs of non-use are read as the tags say them (VACANCY_OSM_SIGNS, in the
+# vacancy block of STEP 08).
+
+# --- sport halls and studios (notebook 08 section 3.4; lib/storey_evidence.py sport_boxes) -------------------------------------
+# The user: "Sports halls shouldn't be counted as two floors - apply industry-like correction to them." The sports-hall rule of
+# 2026-10-05 sets every building it flags to one storey (713 in run 16), but 419 other buildings with a sport use or a sports value
+# counted 2+ storeys, 417 from the height alone: fitness boxes (McFit, INJOY, Fitnessland, Easyfitness), riding and shooting halls,
+# pools, tennis, climbing and bowling halls, 'sports centres' without the hall word, clubhouses, dance schools and gyms in mixed
+# buildings - 41 % of the region's sports value. The industry rule's model: a sport building - a sport class whose own data name a
+# sport use (sport words in the head of its type, an own sport POI, an ALKIS sport function, an OSM sport outline) - counts one
+# storey where only the height gave more (eaves up to 12.5 m): a hall activity from 300 m2 (riding stables and shooting ranges at
+# any size); a studio (fitness, yoga, dance, martial arts) or a generic sports centre from 300 m2 where the height gave two storeys
+# (from 8.75 to 12.25 m OSM levels say one level for only 1 of 18 sport buildings); unless another non-sport occupant, a mixed-use,
+# shop or office type, a school, hotel, care home or hospital, a storeyed sport use (administration, academy, boarding, clinic,
+# community centre ...: the industry rule's storeyed company uses), a type naming floors or OSM outlines averaging 1.5 levels say
+# floors. Clubhouses below 800 m2, boathouses, golf club houses and stadium buildings keep their storeys (the industry rule's
+# canteens: OSM shows an upper or attic floor at about half of the mapped ones). A candidate sport building (only the height gave it
+# more, eaves up to 12.5 m) whose own OSM outlines all say one level counts one storey too, whatever its kind. Checked: Fitnessland Peine (over 4,000 m2 on a 4,881 m2 footprint) and Goslar (over
+# 5,200 m2 on 5,095 m2), EASYFITNESS Gifhorn (1,200 m2), McFit Braunschweig (OSM 1 level), Bowling Base Wolfenbuettel (10 lanes);
+# the three studios and the bowling centre on OSM levels (v8 Vorsfelde and Fallersleben, HYGIA Braunschweig, Malibu bowling
+# Gifhorn) and Fitness First Gifhorn (upstairs) keep theirs. Alone against run 16: 112 buildings to one storey (floor 265,183 -> 131,389 m2); Workers 886 (0.15 %), Leisure 605
+# (0.27 %) and Retail_Non-Daily 9 move; sports -11,650 a day (-9.6 %), lessons -401, meetup -277 (the rates are per m2 of floor).
+FLOOR_SPORT_BOX = {
+    "classes": ["fitness / wellness", "Facilities for culture, leisure and sports", "large discos, fun / leisure pools",
+                "arenas, large events", "entertainment, culture", "theme parks"],   # a sport building is of these classes ...
+    "type_pattern": (r"sports?\b(?! shops?| stores?| goods| retail| outlets?| bars?| medicine| clothing| equipment| nutrition)"
+                     r"|\bgym\b|\bgyms\b|gymnastics|fitness|turnhalle|sporthalle|tennis|squash|badminton|padel|climb|kletter"
+                     r"|boulder|bowling|kegel|skittle|swimming|(?<!pc-)(?<!pc )\bpools?\b|hallenbad|freibad|\bsauna|\btherme"
+                     r"|riding|equestrian|\breit|ponyhof|horse[- ](?:riding|stable)|shooting|sch(?:[uü]|ue)tzen(?:haus|heim|halle"
+                     "|verein|gesellschaft|klause|bruder|br[uü]der|gilde|korporation)|schie(?:ß|ss)(?:stand|sport|halle|anlage"
+                     "|bahn|heim)|archery|ice (?:rink|arena|stadium|hall)|eishalle|trampolin|indoor play|play ?(?:centre|center"
+                     r"|hall|park)|kart|laser ?tag|paintball|minigolf|mini-golf|miniature golf|\bdance|dancing|\btanz|ballet"
+                     r"|martial|judo|karate|taekwondo|dojo|boxing|kickbox|tai ?chi|qigong|\byoga|pilates|crossfit|mcfit|injoy"
+                     "|easy ?fitness|dog (?:agility|sport)|athletic|multi-?sport|clubhouse|club house|sportheim|sportlerheim"
+                     "|vereinsheim"),               # ... and names a sport: sport words in the head of its type,
+    "codes": [3211, 3221, 3230, 2728],              # an ALKIS sports hall, indoor pool, stadium building, riding hall,
+    "osm_tags": ["sports_hall", "sports_centre", "riding_hall", "stadium", "grandstand"],   # an OSM sport outline,
+    "sport_uses": ["sports_centre", "fitness_centre", "fitness", "sports_hall", "multi", "shooting", "equestrian", "horse_riding",
+                   "tennis", "swimming", "gymnastics", "dance", "sauna", "swimming_pool", "yoga", "9pin", "10pin", "athletics",
+                   "water_park", "indoor_play", "climbing", "karting", "water_sports", "sport", "public_bath", "crossfit", "gym",
+                   "diving", "bowling", "laser_tag", "trampoline_park", "padel", "squash", "riding_school", "riding_hall",
+                   "archery", "dancing_school", "dojo", "martial_arts", "dancing", "ballet", "soccer", "table_tennis", "handball",
+                   "basketball", "volleyball", "badminton", "dog_agility", "bowls", "motor", "ice_skating", "ice_rink", "boxing",
+                   "judo", "karate", "fencing", "roller_skating", "skateboard", "billiards", "multisport", "climbing_adventure",
+                   "fighting", "golf", "miniature_golf", "stadium", "canoe", "rowing", "sailing", "field_hockey", "tanzsport",
+                   "pilates", "bowling_alley", "track", "shooting-ground"],   # or an own sport POI (its use, leisure or sport tag)
+    "studio_uses": ["fitness_centre", "fitness", "gym", "crossfit", "yoga", "pilates", "dance", "dancing", "dancing_school",
+                    "ballet", "tanzsport", "dojo", "martial_arts", "judo", "karate", "boxing", "fighting"],   # a studio POI
+    "activity_uses": ["shooting", "equestrian", "horse_riding", "riding_school", "riding_hall", "tennis", "padel", "squash",
+                      "badminton", "swimming", "swimming_pool", "public_bath", "water_park", "sauna", "diving", "ice_rink",
+                      "ice_skating", "climbing", "climbing_adventure", "9pin", "10pin", "bowling", "bowling_alley", "billiards",
+                      "indoor_play", "trampoline_park", "karting", "laser_tag", "miniature_golf", "archery", "shooting-ground",
+                      "sports_hall", "dog_agility", "motor"],   # a hall activity POI
+    "not_sport_poi_groups": ["small_retail", "big_box", "food_store", "department_store", "vehicle", "fuel", "counter",
+                             "personal_service", "gastronomy", "health_practice", "hotel", "holiday_flat", "school", "childcare",
+                             "care_home", "hospital", "industry", "transport", "worship", "fire_rescue", "public_office"],   # never a sport POI
+    "no_occupant_groups": ["gastronomy", "generic", "unmapped", "vacant"],   # no other occupant (eating places, generic, unmapped, vacant)
+    "club_poi_groups": ["office", "community"],     # a club's own office or room named for the club is a sport POI
+    "club_not_uses": ["fraternity", "religion", "place_of_worship", "townhall"],
+    "club_name_pattern": (r"\bsport|\bturn|\btsv\b|\bsv\b|\bfc\b|\bmtv\b|\bvfl\b|\bvfb\b|\btus\b|\bssv\b|\bfsv\b|\bsc\b|\btsg\b"
+                          r"|\bsg\b|\bvfr\b|\bbsv\b|sch[uü]tzen|schie(?:ß|ss)|tennis|\breit|golf|kegel|hockey|\bruder|\bsegel|kanu"
+                          r"|fu(?:ß|ss)ball|handball|\bski\b|skizunft|\bangel"),
+    "school_poi_groups": ["school", "childcare"],   # a school or Kita POI keeps the storeys ...
+    "hotel_poi_groups": ["hotel", "holiday_flat", "care_home", "hospital"],   # ... and so does a hotel, care home or hospital POI
+    "school_classes": ["schools", "universities", "kindergartens", "research institutes"],
+    "hotel_classes": ["hotels", "nursing homes", "hospitals"],
+    "school_pattern": (r"\bschool|schule\b|schulzentrum|realschule|grundschule|hauptschule|oberschule|gesamtschule|\bigs\b|\bkgs\b"
+                       r"|universit|hochschule|college|kolleg|\bbbs\b|berufsbild|gymnasium (?:\(|school|building|kleine|am |an "
+                       "|im )"),
+    "not_school_pattern": ("(?:dance|dancing|ballet|fitness|riding|martial|ski|sailing|swimming|tennis|golf|dog|diving|shooting"
+                           "|tanz|ballett|reit|schwimm|segel|tauch)[- ]?(?:school|schule)|tanzschule|ballettschule|reitschule"),
+    # a mixed-use, shop or office type keeps the storeys
+    "mixed_pattern": ("mixed[- ]?use|multi[- ]?tenant|multi[- ]?purpose commercial|commercial building (?:housing|with)"
+                      "|building housing|shared (?:by|with)|alongside|as well as|several (?:businesses|tenants|shops)|shopping"
+                      r"|\bshops?\b|supermarket|discounter|\bstores?\b|casino|\boffices?\b"),
+    # storeyed sport uses (the industry rule's storeyed company uses)
+    "storeyed_pattern": ("administrat|verwaltung|headquarters|gesch[aä]ftsstelle|academy|akademie|bildungsst"
+                         "|education(?:al)? (?:and training )?cent|leistungszentrum|performance cent|olympiast|internat|boarding"
+                         r"|hostel|jugendherberge|schullandheim|guest ?(?:rooms?|house)|accommodation|hotel|apartments?|\bflats?\b"
+                         r"|dwelling|residen|clinic|klinik|\breha|rehabilit|therap|physio|medical|praxis|practice|sanatori"
+                         "|kur(?:heim|klinik|zentrum|gast)|erholungsheim|convalescen|research|institut|laborator|haus des sports"
+                         "|sportbund|federation|verband|community (?:centre|center|hall|house)|dorfgemeinschaft|gemeinschaftshaus"
+                         "|b[uü]rgerhalle|youth (?:centre|center|club|hostel)|jugend(?:heim|zentrum|freizeit)|kindergarten"
+                         r"|\bkita\b|daycare|library|b[uü]cherei|museum|gallery|town hall|rathaus|cinema|kino\b|kulturzentrum"
+                         "|cultural cent|social (?:centre|center|facility|services)|sozial"),
+    "storeyed_name_pattern": ("internat|akademie|academy|bildungsst|leistungszentrum|klinik|clinic|hotel|jugendherberge"
+                              "|haus des sports|gesch[aä]ftsstelle|verwaltung|sportbund|gemeinschaftshaus|b[uü]rgerhaus|kurgast"
+                              "|kurhaus|kulturzentrum|sozial"),
+    "floors_pattern": (r"multi[- ]?stor(?:e)?y|\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)[- ]?(?:stor(?:e)?y|stories"
+                       r"|storeys|floors?|levels?)\b|\bstoreys\b|\bstories\b|\bupper floors?\b|\bupstairs\b|high[- ]rise|hochhaus"
+                       r"|\btower\b|obergescho|\betage"),   # a type naming floors
+    "activity_pattern": (r"riding|equestrian|\breit|ponyhof|horse[- ](?:riding|stable)|\bstables?\b|shooting|sch(?:[uü]"
+                         "|ue)tzen(?:haus|heim|halle)|schie(?:ß|ss)(?:stand|sport|halle|anlage|bahn)|archery|swimming"
+                         r"|(?<!pc-)(?<!pc )\bpools?\b|hallenbad|\bsauna|\btherme|\bice |eishalle|tennis|squash|badminton|padel"
+                         "|climb|kletter|boulder|bowling|kegel|skittle|trampolin|indoor play|play ?(?:centre|center|hall|park)"
+                         "|kart|laser ?tag|paintball|minigolf|mini-golf|miniature golf|sports? halls?|gym(?:nastics)? halls?"
+                         "|turnhalle|sporthalle|multi[- ]?purpose (?:sports )?hall|mehrzweckhalle|indoor (?:sports?|arena|multi)"
+                         "|dog (?:agility|sport)"), # a hall activity named: one storey from min_m2 ...
+    # fitness, yoga, dance, martial arts: a studio
+    "studio_pattern": (r"fitness|\bgym\b|\bgyms\b|crossfit|mcfit|injoy|easy ?fitness|\byoga|pilates|\bdance|dancing|\btanz|ballet"
+                       "|martial|judo|karate|taekwondo|dojo|boxing|kickbox|tai ?chi|qigong|sportstudio|health (?:club|studio)"),
+    "studios": True,                                # False: studios keep their storeys (option B)
+    "club_pattern": (r"club ?house|clubheim|clubhaus|sportheim|sportlerheim|vereinsheim|vereinshaus|sporthaus\b|changing rooms?"
+                     "|umkleide|club building|clubroom|club room|sports club building|vereinsgastst|sch(?:[uü]|ue)tzen(?:haus|heim"
+                     r"|klause)|sch(?:ie(?:ß|ss)heim)|\bpavilion"),
+    "club_max_m2": 800.0,                           # a club-typed building from here is a hall with club rooms
+    "clubs": False,                                 # True: clubhouses count one storey too (option A2)
+    # boathouses, golf club houses, stadium buildings keep their storeys
+    "keep_pattern": (r"boat ?house|bootshaus|rowing|\bruder|canoe|\bkanu|sailing|\bsegel|wassersport|wasserwander|golf ?(?:club"
+                     r"|klub)|golf-club|stadium|stadion|grandstand|trib[uü]ne|\btribune"),
+    "min_m2": 300.0,                                # a hall from here (a single gym hall is 15 x 27 m) ...
+    "any_size_pattern": (r"riding|equestrian|\breit|ponyhof|horse[- ](?:riding|stable)|\bstables?\b|shooting|sch(?:[uü]|ue)tzen"
+                         "|schie(?:ß|ss)|archery"), # ... except riding stables and shooting ranges (any size)
+    "any_size_uses": ["equestrian", "horse_riding", "riding_school", "riding_hall", "shooting", "archery", "shooting-ground"],
+    "low_max_storeys": 2,                           # studios and generic types only where the height gave 2 storeys
+    "max_eaves_m": 12.5,                            # = FLOOR_BOX_MAX_EAVES_M; the mean height where none
+    "osm_min_cover": 0.5,                           # OSM outlines over at least half of the footprint ...
+    "osm_min_levels": 1.5,                          # ... averaging this or more say floors
+    "osm_one": True,                                # OSM outlines that all say 1 make any candidate sport building one storey
+}
+
+# --- places known to be closed (notebook 08 section 4.2) ----------------------------------------------------------------------
+# The user: "for known places like Stadthalle Braunschweig which you say is closed: is it closed now in 2026? If yes then let it be
+# unassigned". Each place below is closed on CLOSED_AS_OF by a dated source (city, operator, press, OSM history); it gives no unit,
+# like a vacant place, nor do the asked POIs in it (except 'keep_pois': an active place in an attached structure). 'since' is the
+# closing day where a source gives it, else the earliest dated evidence of the closure. A renovation counts where the whole
+# building is a building site; a place whose successor is mapped is not closed. A place an OSM sign or
+# GONE_BUILDINGS already leaves out keeps that reason (the Stadthalle, Bad Gliesmarode and the Nordsteimke site carry OSM signs;
+# the list is their backstop). The zone totals still hold: the zone's other carriers take the share, or the ring fallback where the
+# place was the zone's last carrier (the Holwedestrasse cafeteria's Retail_Daily). Re-check the list at every re-run: section 4.2
+# names the entries whose planned reopening year has come - the new Marktkauf Wolfsburg-Nordsteimke opens on 2026-12-03 (then drop
+# its entry and re-extract step 01: its building=construction outline keeps it out until then).
+# The review of run 17 added the former prison Braunschweig-Rennelberg (cleared in May 2024): it had become the largest Workers
+# gainer of its zone when the Klinikum site closed.
+# Alone against run 16: 23 buildings in 13 places; Workers 2,829 (0.48 %), Retail_Daily 10,874 (1.20 %) and Leisure 972 (0.44 %)
+# move; business -174, errands -379, sports -854, meetup -8 a day.
+CLOSED_AS_OF = "2026-10-09"
+CLOSED_BUILDINGS = {
+    "DENIAL01000051AX": {
+        "what": "Stadthalle Braunschweig (Leonhardplatz 14): general renovation into a congress and event hall, a building site",
+        "since": "2024-07-31",
+        "until": "2028",
+        "source": ("https://ratsinfo.braunschweig.de/public/wicket/resource/org.apache.wicket.Application/doc2203829.pdf and "
+                   ".../doc2203824.pdf (the city's status report of 2026-05-29 and the update of Nov 2024: closure fixed for 31 "
+                   "July 2024, site set up from 1 August, asbestos removal in the Grosser Saal, opening 2028 kept; seen "
+                   "2026-10-09 through the search index, the files themselves sit behind a bot check); "
+                   "https://www.baulinks.de/webplugin/2025/0688.php4 (2025-05-19: works since 2024, facade panels removed, "
+                   "reopening 2028; seen 2026-10-09); https://api.openstreetmap.org/api/0.6/changeset/161729312 (2025-01-24, "
+                   "survey: \"Baustelle Stadthalle bis vrsl. 2028\", building=construction; seen 2026-10-09)")},
+    "DENIAL0100005xOq": {
+        "what": ("Vieweghaus, main building of the Braunschweigisches Landesmuseum (Burgplatz 1): closed for renovation, gutted "
+                 "since April 2024 in the second construction phase, a building site"),
+        "since": "2024-04-01",
+        "until": "2028",
+        "source": ("https://3landesmuseen-braunschweig.de/en/braunschweigisches-landesmuseum/the-museum/restoration-works "
+                   "(\"currently closed for renovation ... Reopening is planned for late 2028\"; seen 2026-10-09); "
+                   "https://www.nlbl.niedersachsen.de/download/206559/Sanierung_des_Vieweghauses.pdf (Staatliches Baumanagement "
+                   "Braunschweig, April 2024: both buildings \"komplett entkernt\", works April 2024 to end 2027, the new "
+                   "exhibition by end 2028; seen 2026-10-09)")},
+    "DENIAL0100005xO5": {
+        "what": ("Burg Dankwarderode (Burgplatz 4), branch of the Herzog Anton Ulrich-Museum: closed for serious structural "
+                 "defects, its whole collection moved to the HAUM; the Antiquariat Fuhrmann in the small annex stays open"),
+        "since": "2023-08-22",
+        "until": None,
+        "keep_pois": ("way/243689994",),
+        "source": ("https://3landesmuseen-braunschweig.de/assets/user_upload/HAUM/Presseinformationen/2025-06-25_PM_HAUM_praesentiert_Zwischenl%C3%B6sung_fuer_Burg_Dankwarderode.pdf "
+                   "(HAUM 2025-06-25: \"Aufgrund erheblicher Maengel musste das historische Gebaeude im Sommer 2023 geschlossen "
+                   "werden\", the collection shown in the HAUM from 2026-03-05; seen 2026-10-09); "
+                   "https://maps.adac.de/poi/burg-dankwarderode-braunschweig (\"Derzeit bis auf weiteres geschlossen (Stand: "
+                   "22.8.2023)\"; seen 2026-10-09); the Antiquariat Fuhrmann: OSM way/243689994, shop=books, opening_hours "
+                   "Fr,Sa 12:00-18:00 (step-01 extract of 2026-09-10)")},
+    "DENIAL0100006qPi": {
+        "what": ("Bad Gliesmarode (Am Soolanger 1), indoor pool: closed; renovation decided by the council on 2025-05-27, about "
+                 "two thirds of the building to be pulled down"),
+        "since": "2024-11-30",
+        "until": "2029",
+        "source": ("https://www.foerderverein-badezentrum-gliesmarode.de/ (\"am 30. November 2024 vorlaeufig "
+                   "geschlossen\"; reopening moved from 2028 to Q2 2029 in April 2026; seen 2026-10-09); "
+                   "https://www.braunschweig.de/politik_verwaltung/nachrichten/medien/2025-04-11_Beschlussvorlage_Bad_Gliesmarode.pdf "
+                   "(council paper 25-25510: the indoor pool closed at the turn of the year 2024/25, works from end 2026; seen "
+                   "2026-10-09)")},
+    "DENIAL0100002vwQ": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "main building Holwedestrasse 16"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vDJ": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vnz": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic wing joined to the main building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vhq": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vkz": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vnh": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vy2": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "clinic building"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0100002vBZ": {
+        "what": ("Staedtisches Klinikum Braunschweig, site Holwedestrasse: closed for good, its clinics moved to Salzdahlumer "
+                 "Strasse (the administration at Freisestrasse 9-13 stays and is not listed) - "
+                 "the hospital cafeteria"),
+        "since": "2024-12-11",
+        "until": None,
+        "source": ("https://klinikum-braunschweig.de/lib/files/4b5w26djmmxwc7tAnfrwyzjpgq6tml62n8rxk6lfnz5hglzrg7ztgnzvgyzdgnq/48_2024_12_06-pm-wir-ziehen-um-schliessung-des-klinikstandorts-holwedestrasse-ab-dem-11-dezember-2024.pdf "
+                   "(Klinikum press release 2024-12-06: \"Am 11. Dezember 2024 schliesst der Standort Holwedestrasse endgueltig "
+                   "seine Tueren\", care bundled at Salzdahlumer Strasse and Celler Strasse; seen 2026-10-09)")},
+    "DENIAL0500003Dte": {
+        "what": ("St.-Elisabeth-Krankenhaus Salzgitter-Bad (Liebenhaller Strasse 20): closed after the insolvency, patients "
+                 "moved, emergency care deregistered (the separate MVZ St. Elisabeth is not listed)"),
+        "since": "2026-09-30",
+        "until": None,
+        "source": ("https://www.aerzteblatt.de/news/krankenhaus-in-salzgitter-schliesst-457df582-069b-420a-91e1-8f23897b0c60 "
+                   "(Aerzteblatt 2026-09-28: the hospital \"stellt seinen Betrieb zum Monatsende ein\", about 250 staff affected; "
+                   "seen 2026-10-09)")},
+    "DENIAL040000er1N": {
+        "what": ("former mein real Helmstedt (Werner-von-Siemens-Strasse 3), hypermarket: closed for good, the building stands "
+                 "empty"),
+        "since": "2024-03-23",
+        "until": None,
+        "source": ("https://regionalheute.de/die-letzten-real-maerkte-tag-der-schliessung-steht-fest-braunschweig-gifhorn-goslar-harz-helmstedt-peine-salzgitter-wolfenbuettel-wolfsburg-1710333843/ "
+                   "(2024-03-13: the mein-real stores Helmstedt, Werner-von-Siemens-Strasse 3, and Wolfsburg-Nordsteimke, "
+                   "Hehlinger Strasse 21, close on 23 March; seen 2026-10-09); "
+                   "https://www.yumpu.com/de/document/view/71079899/helmstedter-sonntag-vom-05042026 (Helmstedter Sonntag "
+                   "2026-04-05: \"Nicht nur der ehemalige Real-Supermarkt steht leer\"; seen 2026-10-09)")},
+    "DENIAL9100006RDd": {
+        "what": ("former mein real Wolfsburg-Nordsteimke (Hehlinger Strasse 21): closed, the old store pulled down; a new "
+                 "Marktkauf is being built on the site, opening planned for 2026-12-03 (re-check then)"),
+        "since": "2024-03-23",
+        "until": "2026",
+        "source": ("https://regionalheute.de/die-letzten-real-maerkte-tag-der-schliessung-steht-fest-braunschweig-gifhorn-goslar-harz-helmstedt-peine-salzgitter-wolfenbuettel-wolfsburg-1710333843/ "
+                   "(2024-03-13: the mein-real stores Helmstedt, Werner-von-Siemens-Strasse 3, and Wolfsburg-Nordsteimke, "
+                   "Hehlinger Strasse 21, close on 23 March; seen 2026-10-09); "
+                   "https://verbund.edeka/verbunds-website/regionsseiten_ez/mh/presse/pdfs-pis/25-11-06-spatenstich-marktkauf-wolfsburg-nordsteimke.pdf "
+                   "and .../26-07-16-ein-blick-auf-die-baustelle-des-kuenftigen-marktkauf-wolfsburg-nordsteimke.pdf (EDEKA "
+                   "Minden-Hannover: groundbreaking 2025-11-06, opening planned 2026-12-03; seen 2026-10-09 through the search "
+                   "index, the files answer 404 now); OSM way/25454662 building=construction, proposed=supermarket (extract "
+                   "2026-09-10)")},
+    "DENIAL0100001rBq": {
+        "what": ("Grotrian-Steinweg piano factory (Grotrian-Steinweg-Strasse 2, Braunschweig): production ended and the factory "
+                 "closed after the insolvency of August 2024; OSM marks the outline disused (disused:building=commercial, no "
+                 "building tag, so the step-01 extract cannot see it)"),
+        "since": "2025-01-31",
+        "until": None,
+        "source": ("https://en.wikipedia.org/wiki/Grotrian-Steinweg (\"the company filed for insolvency at the end of August "
+                   "2024\"; \"In January 2025, Parsons Music Group closed the Grotrian-Steinweg piano factory\"; seen "
+                   "2026-10-09); https://api.openstreetmap.org/api/0.6/way/22950062/history (version 6, 2026-05-04: "
+                   "building=commercial -> disused:building=commercial; seen 2026-10-09)")},
+    "DENIAL0100000U6B": {
+        "what": ("Gewerbepark Braunschweig, Steinriedendamm 15, Halle 22 (OSM \"Gebaeude 22\"): empty and under conversion when "
+                 "seen on 2026-10-09 (the day it emptied is not known), to let from June 2027"),
+        "since": "2026-10-09",
+        "until": "2027",
+        "source": ("https://mileway.com/de/immobilien/de/portfolio/steinriedendamm-15-halle-22/ (\"Die Halle befindet sich "
+                   "derzeit im Umbau und wird voraussichtlich im Q4 2027 fertiggestellt\"; available 01.06.2027; seen 2026-10-09)")},
+    "DENIAL0100004ZYO": {
+        "what": ("the indoor tennis hall (2 courts) of the Sportanlage Rote Wiese, Braunschweig: closed by the city for "
+                 "structural defects of its timber trusses, a repair rejected, demolition decided; today OSM maps no building on "
+                 "its footprint"),
+        "since": "2022-03-24",
+        "until": None,
+        "source": ("https://ratsinfo.braunschweig.de/integration/wicket/resource/org.apache.wicket.Application/doc1560592.pdf, "
+                   ".../public/.../doc1583149.pdf and .../doc1646107.pdf (city statements 2022-2023: closed on 24 March 2022, "
+                   "permanently unusable, Rueckbau planned; seen 2026-10-09 through the search index, the files sit behind a bot "
+                   "check); overpass-api.de (no building within 80 m of the footprint centre 52.23779, 10.53213; seen 2026-10-09)")},
+    "DENIAL0300001Gif": {
+        "what": ("the former Freizeitcenter Seesen (bowling; Hermann-Loens-Strasse 1A, Seesen): OSM has named it \"ehemaliges "
+                 "Freizeitcenter Seesen\" since 2019 and carries no leisure or amenity tag (only sport=10pin); its website shows "
+                 "only the domain name"),
+        "since": "2019-11-13",
+        "until": None,
+        "source": ("https://api.openstreetmap.org/api/0.6/way/210566593/history (version 4, 2019-11-13: name \"Freizeitcenter "
+                   "Seesen\" -> \"ehemaliges Freizeitcenter Seesen\", kept in version 5 of 2026-01-04; no leisure or amenity tag; "
+                   "seen 2026-10-09); http://www.freizeitcenter-seesen.de (only the domain name; seen 2026-10-09)")},
+    "DENIAL0100002vAV": {
+        "what": ("the former prison Braunschweig-Rennelberg (Justizvollzugsanstalt, Rennelbergstrasse 10): cleared in May 2024, "
+                 "its security systems removed, the site for sale - the main building"),
+        "since": "2024-05",
+        "until": None,
+        "source": ("https://www.volksstimme.de/panorama/bald-hotel-oder-restaurant-gefangnis-steht-zum-verkauf-4118064 (dpa "
+                   "2025-09-19: \"Im Mai 2024 wurde das 1884 fertiggestellte Gefaengnis geraeumt\", the state offers it for sale "
+                   "from 3.6 million euros; seen 2026-10-09); https://www.tageskarte.io/war-noch-was/detail/bald-hotel-oder-"
+                   "restaurant-gefaengnis-in-braunschweig-steht-zum-verkauf.html (2025-09-21; seen 2026-10-09)")},
+    "DENIAL0100002vsh": {
+        "what": ("the former prison Braunschweig-Rennelberg (Justizvollzugsanstalt, Rennelbergstrasse 10): cleared in May 2024, "
+                 "its security systems removed, the site for sale - a prison building next to it"),
+        "since": "2024-05",
+        "until": None,
+        "source": ("https://www.volksstimme.de/panorama/bald-hotel-oder-restaurant-gefangnis-steht-zum-verkauf-4118064 (dpa "
+                   "2025-09-19: \"Im Mai 2024 wurde das 1884 fertiggestellte Gefaengnis geraeumt\", the state offers it for sale "
+                   "from 3.6 million euros; seen 2026-10-09); https://www.tageskarte.io/war-noch-was/detail/bald-hotel-oder-"
+                   "restaurant-gefaengnis-in-braunschweig-steht-zum-verkauf.html (2025-09-21; seen 2026-10-09)")},
+    "DENIAL0100002vn5": {
+        "what": ("the former prison Braunschweig-Rennelberg (Justizvollzugsanstalt, Rennelbergstrasse 10): cleared in May 2024, "
+                 "its security systems removed, the site for sale - the laundry and kitchen building (OSM way/37808007 \"JVA "
+                 "Waschhaus/Kuechengebaeude\")"),
+        "since": "2024-05",
+        "until": None,
+        "source": ("https://www.volksstimme.de/panorama/bald-hotel-oder-restaurant-gefangnis-steht-zum-verkauf-4118064 (dpa "
+                   "2025-09-19: \"Im Mai 2024 wurde das 1884 fertiggestellte Gefaengnis geraeumt\", the state offers it for sale "
+                   "from 3.6 million euros; seen 2026-10-09); https://www.tageskarte.io/war-noch-was/detail/bald-hotel-oder-"
+                   "restaurant-gefaengnis-in-braunschweig-steht-zum-verkauf.html (2025-09-21; seen 2026-10-09)")},
+    "DENIAL0100002vBc": {
+        "what": ("the former prison Braunschweig-Rennelberg (Justizvollzugsanstalt, Rennelbergstrasse 10): cleared in May 2024, "
+                 "its security systems removed, the site for sale - the staff house (OSM way/41853951 \"JVA Beamtenwohnung\")"),
+        "since": "2024-05",
+        "until": None,
+        "source": ("https://www.volksstimme.de/panorama/bald-hotel-oder-restaurant-gefangnis-steht-zum-verkauf-4118064 (dpa "
+                   "2025-09-19: \"Im Mai 2024 wurde das 1884 fertiggestellte Gefaengnis geraeumt\", the state offers it for sale "
+                   "from 3.6 million euros; seen 2026-10-09); https://www.tageskarte.io/war-noch-was/detail/bald-hotel-oder-"
+                   "restaurant-gefaengnis-in-braunschweig-steht-zum-verkauf.html (2025-09-21; seen 2026-10-09)")},
+}
+# All together against run 16 (round 17 with the fixes of its review): Workers 7,305 (1.23 %), Retail_Daily 12,936 (1.42 %),
+# Retail_Non-Daily 2,887 (0.37 %), Leisure 2,045 (0.92 %) and University 49 (0.13 %: the vacant AStA workshop of run 16 now keeps
+# the floor it would occupy if active) move, School and Kindergarten nothing; the visitor values: business -1,171 (-2.8 %), errands
+# -937 (-0.4 %), sports -12,420 (-10.2 %), meetup -360 (-1.0 %), lessons -401 (-2.7 %) a day; 420 buildings and 20 asked POIs
+# give no unit (vacant, gone or closed; 288 and 5 in run 16), 115 buildings change storeys and 23 their class; the last-carrier guard
+# restores 54 rows (the closed Holwedestrasse cafeteria's Retail_Daily row goes: its zone's share takes the ring fallback).
+REDIST_FALLBACK_MAX_RINGS = None                # None: widen until carriers are found; an int stops there, the rest is logged unassigned
+REDISTRIBUTION_FILE = OUTPUT_DIR / "08_redistribution.gpkg"
+
+
+# =============================================================================
+# STEP 08b — floor-area comparison: step 08 on floor area instead of volume
+# =============================================================================
+# The FGSV Bosserhof factors are workers per 100 m2 of gross floor area, not per m3 (the
+# 2026-08-19 bug report on the previous pipeline, BUG-04). Step 08 weights by volume, so a
+# 16 m single-storey hall weighs four times a 4 m building of the same footprint. Notebook
+# 08b repeats step 08 unchanged except for the size measure and puts both runs side by side.
+# Decided with the user 2026-10-05:
+#   * floor area = footprint x storeys, storeys = max(1, round(h / FLOOR_STOREY_HEIGHT_M));
+#     h = the eaves height (the roof space is not counted), capped at the mean height
+#     volume / footprint so that a tower part does not lift the whole footprint; the mean
+#     height where no eaves height exists (the 1,600 OSM gap rows);
+#   * a hall counts as one storey whatever its height: its Bosserhof class is in
+#     HALL_BOSSERHOF_CLASSES or the head of its step-05 type matches HALL_TYPE_PATTERN - but
+#     never when the head matches HALL_TYPE_EXCLUDE_PATTERN: an office (the user's rule) and,
+#     added on the data, a town or city hall, a headquarters or administration building, a
+#     residential or mixed-use building ("a small industrial workshop and commercial units
+#     above residential apartments");
+#   * the head of the type is the text before the first "with", "housing", "containing",
+#     "including", "shared by", comma, semicolon or bracket (HALL_TYPE_HEAD_SPLIT): the words
+#     must describe the building, not something in it. Reading the whole type in the first
+#     run kept real halls multi-storey on "post office", the verb "housing" or
+#     "home-improvement" (VW Halle 16 got 5 storeys and +10,054 workers from its neighbours)
+#     and made schools "with sports halls" one storey;
+#   * OSM building:levels, where mapped, gives the storeys and overrides both
+#     (FLOOR_OSM_LEVELS_MAX);
+#   * floor area replaces volume for every category; everything else - units, shares, rest
+#     units, vacancy, factors, fallback - is step 08's.
+# One storey height for every building makes floor area about volume / 3.5, i.e. nearly
+# the volume run: the differences come from the hall rule, the rounding to whole storeys and
+# eaves vs mean height.
+FLOOR_STOREY_HEIGHT_M = 3.5
+# The hall classes: all four groups the user picked (2026-10-05, in a parallel session merged
+# into this one): industry, storage and transport; big-box retail and car dealers; crafts and
+# vehicle repair; arenas, discos and leisure pools.
+HALL_BOSSERHOF_CLASSES = frozenset({
+    "Transport",
+    "Industrial operations / Production",
+    "highly productive industries / machine / material or space intensive",
+    "others",                                   # the industrial "others" (BOSSERHOF_NORMALIZATION_MAP)
+    "Yards, depots, storage areas, construction yards",
+    "wholesale", "discount stores", "DIY stores", "furniture stores", "hypermarkets / superstores",
+    "self-service department stores", "car dealerships", "suppliers for car dealerships",
+    "Crafts and trades", "craft businesses", "craft courtyards", "vehicle / electrical repair",
+    "arenas, large events", "large discos, fun / leisure pools",
+})
+# OSM building:levels, where mapped as a whole number from 1 to this, gives the storeys and
+# overrides the hall rule and the height (the user, 2026-10-05). On the kept buildings it is
+# mapped on 212 OSM gap rows only, whose 2 m storey height would otherwise undercount them.
+FLOOR_OSM_LEVELS_MAX = 60
+HALL_TYPE_HEAD_SPLIT = r"\s+(?:with|housing|containing|including|shared\s+by)\s+|[,;(]"
+HALL_TYPE_PATTERN = r"\b(?:halls?|warehouses?|factory|factories|workshops?|depots?)\b"
+HALL_TYPE_EXCLUDE_PATTERN = (r"\boffices?\b|\b(?:town|city)\s+halls?\b|\bheadquarters\b|\badministrat\w*"
+                             r"|\b(?:residential|apartments?|dwellings?|mixed\W?use)\b")
+# For a plausibility check only, never a weight: the FGSV range per class in workers per
+# 100 m2 of gross floor area, (low, high), from the previous pipeline's source table
+# (Capacity_Calculation-pipeline-original/bosserhof-based-vs-visum-based-redistribution.ipynb).
+# BOSSERHOF_WEIGHTS holds the midpoints (notebook 08 checks it). Single values where the table
+# gives one; the headline classes and three of the four classes added later (discos / leisure
+# pools, arenas, theme parks) have none. That table gives vehicle / electrical repair 1.7-2.3
+# and small-scale retail 2.5-5.0; the user fixed both on 2026-10-05 from their sources - 1.7-3.3
+# (30-60 m2 per employee, as the bug report quotes FGSV) and 2.0-5.0 (20-50 m2 per employee) -
+# and added nursing homes 1.0-1.5 (STEP 08, BOSSERHOF_WEIGHTS).
+BOSSERHOF_FGSV_RANGES = {
+    "transport": (0.5, 0.5),
+    "yards depots storage areas construction yards": (0.7, 1.0),
+    "highly productive industries machine material or space intensive": (0.7, 1.0),
+    "others industrial": (1.7, 2.0),
+    "craft businesses": (1.3, 2.5),
+    "craft courtyards": (1.7, 2.0),
+    "normal office": (2.5, 3.3),
+    "open plan office": (3.3, 5.0),
+    "business oriented services": (2.0, 5.0),
+    "customer oriented services": (2.0, 4.0),
+    "hotels": (1.0, 2.0),
+    "hotels with conference areas": (0.7, 0.9),
+    "restaurants gastronomy": (1.3, 2.5),
+    "suppliers for car dealerships": (1.7, 1.7),
+    "vehicle electrical repair": (1.7, 3.3),
+    "customer service": (3.3, 3.3),
+    "car dealerships": (0.7, 0.7),
+    "wholesale": (2.0, 2.9),
+    "retail small scale": (2.0, 5.0),
+    "discount stores": (0.7, 1.1),
+    "diy stores": (0.7, 0.8),
+    "furniture stores": (0.4, 0.7),
+    "hypermarkets superstores": (1.0, 1.4),
+    "shopping centers": (2.2, 4.0),
+    "self service department stores": (1.0, 1.2),
+    "department stores": (1.3, 1.8),
+    "factory outlet centers": (1.8, 2.5),
+    "schools": (0.5, 1.5),
+    "universities": (0.5, 1.0),
+    "research institutes": (1.0, 1.5),
+    "kindergartens": (1.7, 2.9),
+    "hospitals": (1.0, 1.5),
+    "nursing homes": (1.0, 1.5),
+    "entertainment culture": (1.67, 1.67),
+    "large cinemas": (0.83, 0.83),
+    "musical theatres": (1.43, 1.43),
+    "fitness wellness": (0.8, 0.8),
+}
+FLOOR_AREA_COMPARISON_FILE = OUTPUT_DIR / "08b_floor_area_comparison.gpkg"
