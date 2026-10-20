@@ -14,9 +14,18 @@ WHAT THIS DOES
 
 THE THREE LAYERS (strict precedence — first layer that answers, wins)
   1. OSM POI tags on the building: amenity / shop / tourism / building /
-     information, plus key:value pairs recovered from `additional_information`
-     (office=*, craft=*, social_facility=*). A building may carry several POIs;
-     each is looked up and the results are reconciled (`reconcile_multi_poi`).
+     information / leisure / healthcare / club / sport, plus key:value pairs
+     recovered from `additional_information` (office=*, craft=*,
+     social_facility=*). A building may carry several POIs; each is looked up
+     and the results are reconciled (`reconcile_multi_poi`). For keys whose
+     values all share one meaning (shop, office, craft, social_facility,
+     healthcare, club, sport) an unlisted value takes the key's default row.
+     A building with SHOPPING_CENTRE_MIN_SHOPS or more shops of its own is a
+     shopping centre.
+
+  The labels are the purposes a place of that kind clearly serves. A purpose
+  it only may serve (a company office's occasional business visitor, a
+  church's leisure) is left out.
   2. ALKIS building-function code (`function`, e.g. "31001_2000") against
      ALKIS_RULES — one row per code, 71 of which occur in this study area.
   3. OSM footprint type (`osm_building_type`) then OSM land use
@@ -181,9 +190,13 @@ AMENITY_RULES = {
     "prep_school":       ({"lessons"}, "customer oriented services"),
     "training":          ({"lessons"}, "customer oriented services"),
     "research_institute":({"work"}, "research institutes"),
-    "library":           ({"leisure"}, "public facilities"),
+    "library":           ({"leisure"}, "entertainment culture"),
+    "education":         ({"lessons"}, "customer oriented services"),
+    "education_center":  ({"lessons"}, "customer oriented services"),
+    "first_aid_school":  ({"lessons"}, "customer oriented services"),
+    "sailing_school":    ({"lessons"}, "customer oriented services"),
 
-    # Healthcare
+    # Healthcare. A care home's residents are visited: meetup, not errands.
     "hospital":          ({"errands"}, "hospitals"),
     "clinic":            ({"errands"}, "hospitals"),
     "doctors":           ({"errands"}, "customer oriented services"),
@@ -191,31 +204,53 @@ AMENITY_RULES = {
     "pharmacy":          ({"retail_daily"}, "customer oriented services"),
     "veterinary":        ({"errands"}, "customer oriented services"),
     "naturopathy":       ({"errands"}, "customer oriented services"),
-    "social_facility":   ({"errands"}, "nursing homes"),
-    "nursing_home":      ({"errands"}, "nursing homes"),
+    "physiotherapist":   ({"errands"}, "customer oriented services"),
+    "speech_therapist":  ({"errands"}, "customer oriented services"),
+    "alternative":       ({"errands"}, "customer oriented services"),
+    "healthcare":        ({"errands"}, "customer oriented services"),
+    "health_centre":     ({"errands"}, "customer oriented services"),
+    "social_facility":   ({"meetup"}, "nursing homes"),
+    "nursing_home":      ({"meetup"}, "nursing homes"),
 
-    # Public / civic
-    "townhall":          ({"errands"}, "public facilities"),
-    "courthouse":        ({"errands"}, "public facilities"),
-    "police":            ({"errands"}, "public facilities"),
-    "public_building":   ({"errands"}, "public facilities"),
-    "fire_station":      ({"work"}, "public facilities"),
+    # Public / civic. Administration is office work (Services), not a public
+    # facility: that class is for education, research, health and care. A
+    # counter people visit is errands; an authority's offices are only work.
+    "townhall":          ({"errands"}, "customer oriented services"),
+    "courthouse":        ({"errands"}, "normal office"),
+    "police":            ({"errands"}, "normal office"),
+    "public_building":   (set(), "services"),
+    "archive":           (set(), "normal office"),
+    "fire_station":      ({"work"}, "yards depots storage areas construction yards"),
     "post_office":       ({"errands"}, "customer oriented services"),
-    "post_depot":        ({"errands"}, "customer oriented services"),
-    "community_centre":  ({"meetup", "leisure"}, "public facilities"),
-    "social_centre":     ({"meetup", "leisure"}, "public facilities"),
-    "fraternity":        ({"meetup"}, "public facilities"),
+    "post_depot":        ({"work"}, "yards depots storage areas construction yards"),
+    "bus_depot":         ({"work"}, "yards depots storage areas construction yards"),
+    "building_yard":     ({"work"}, "yards depots storage areas construction yards"),
+    "road_maintenance":  ({"work"}, "yards depots storage areas construction yards"),
+    "road_maintenance_depot": ({"work"}, "yards depots storage areas construction yards"),
+    "road_salt_storage": ({"work"}, "yards depots storage areas construction yards"),
+    # Places people visit to meet: community and club houses, places of worship.
+    "community_centre":  ({"meetup"}, "entertainment culture"),
+    "social_centre":     ({"meetup"}, "entertainment culture"),
+    "fraternity":        ({"meetup"}, "entertainment culture"),
+    "clubhouse":         ({"meetup"}, "entertainment culture"),
+    "parish_hall":       ({"meetup"}, "entertainment culture"),
     "events_venue":      ({"meetup", "leisure"}, "arenas large events"),
+    "events_centre":     ({"meetup", "leisure"}, "arenas large events"),
     "conference_centre": ({"business", "meetup"}, "hotels with conference areas"),
-    "place_of_worship":  ({"meetup", "leisure"}, "public facilities"),
+    "place_of_worship":  ({"meetup"}, "entertainment culture"),
+    "monastery":         ({"meetup"}, "entertainment culture"),
     "arts_centre":       ({"leisure"}, "entertainment culture"),
+    "planetarium":       ({"leisure"}, "entertainment culture"),
     "theatre":           ({"leisure"}, "musical theatres"),
     "cinema":            ({"leisure"}, "large cinemas"),
     "exhibition_centre": ({"leisure", "business"}, "arenas large events"),
 
-    # Money
+    # Money and private-client services
     "bank":              ({"errands"}, "customer oriented services"),
     "bureau_de_change":  ({"errands"}, "customer oriented services"),
+    "tax_agent":         ({"errands"}, "business oriented services"),
+    "letting_agency":    ({"errands"}, "customer oriented services"),
+    "customer_care_center": ({"errands"}, "customer service"),
 
     # Vehicles / transport-adjacent enterable buildings
     "fuel":              ({"errands"}, "transport"),
@@ -228,10 +263,15 @@ AMENITY_RULES = {
     "bus_station":       ({"errands"}, "transport"),
 
     # Miscellaneous enterable
-    "coworking_space":   ({"work", "business"}, "open plan office"),
-    "studio":            ({"work", "business"}, "normal office"),
+    "coworking_space":   ({"work"}, "open plan office"),
+    "studio":            ({"work"}, "normal office"),
     "gym":               ({"sports"}, "fitness wellness"),
+    "dojo":              ({"sports"}, "fitness wellness"),
+    "dive_centre":       ({"sports"}, "fitness wellness"),
+    "public_bath":       ({"sports"}, "fitness wellness"),
     "spa":               ({"leisure"}, "fitness wellness"),
+    "hookah_lounge":     ({"leisure"}, "restaurants gastronomy"),
+    "canteen":           ({"work"}, "restaurants gastronomy"),   # staff only
     "internet_cafe":     ({"leisure"}, "customer oriented services"),
     "ski_rental":        ({"errands"}, "customer oriented services"),
     "animal_shelter":    ({"work"}, "others industrial"),
@@ -240,7 +280,15 @@ AMENITY_RULES = {
     "funeral_hall":      ({"errands"}, "public facilities"),
     "crematorium":       ({"errands"}, "public facilities"),
 
+    "prison":            ({"work"}, "public facilities"),       # like ALKIS 31001_3075
+
     # Not buildings / not destinations.
+    "recycling":         (set(), None),
+    "grave_yard":        (set(), None),
+    "shelter":           (set(), None),
+    "polling_station":   (set(), None),
+    "reception_desk":    (set(), None),
+    "payment_terminal":  (set(), None),
     "public_bookcase":   (set(), None),
     "shower":            (set(), None),
     "photo_booth":       (set(), None),
@@ -267,12 +315,18 @@ SHOP_RULES = {
     "kiosk":             ({"retail_daily"}, "retail small scale"),
     "beverages":         ({"retail_daily"}, "retail small scale"),
     "alcohol":           ({"retail_daily"}, "retail small scale"),
-    "wine":              ({"retail_daily"}, "retail small scale"),
     "coffee":            ({"retail_daily"}, "retail small scale"),
     "tea":               ({"retail_daily"}, "retail small scale"),
     "chemist":           ({"retail_daily"}, "retail small scale"),
     "general":           ({"retail_daily"}, "retail small scale"),
-    "variety_store":     ({"retail_daily"}, "retail small scale"),
+    "grocery":           ({"retail_daily"}, "retail small scale"),
+    "food":              ({"retail_daily"}, "retail small scale"),
+    "cheese":            ({"retail_daily"}, "retail small scale"),
+    "spices":            ({"retail_daily"}, "retail small scale"),
+    "organic":           ({"retail_daily"}, "retail small scale"),
+    "nuts":              ({"retail_daily"}, "retail small scale"),
+    "chocolate":         ({"retail_daily"}, "retail small scale"),
+    "eggs":              ({"retail_daily"}, "retail small scale"),
     "farm":              ({"retail_daily"}, "retail small scale"),
     "deli":              ({"retail_daily"}, "retail small scale"),
     "confectionery":     ({"retail_daily"}, "retail small scale"),
@@ -281,10 +335,13 @@ SHOP_RULES = {
     "seafood":           ({"retail_daily"}, "retail small scale"),
     "health_food":       ({"retail_daily"}, "retail small scale"),
     "newsagent":         ({"retail_daily"}, "retail small scale"),
-    "stationery":        ({"retail_daily"}, "retail small scale"),
     "tobacco":           ({"retail_daily"}, "retail small scale"),
 
-    # Non-daily / durable / specialty goods
+    # Non-daily / durable / specialty goods. Any shop=* value not listed in
+    # this table is non-daily small-scale retail (SHOP_DEFAULT below).
+    "wine":              ({"retail_non_daily"}, "retail small scale"),
+    "stationery":        ({"retail_non_daily"}, "retail small scale"),
+    "variety_store":     ({"retail_non_daily"}, "retail small scale"),
     "clothes":           ({"retail_non_daily"}, "retail small scale"),
     "boutique":          ({"retail_non_daily"}, "retail small scale"),
     "fashion_accessories": ({"retail_non_daily"}, "retail small scale"),
@@ -342,18 +399,23 @@ SHOP_RULES = {
 
     # Service premises — a visit is a functional task, not shopping.
     "car_repair":        ({"errands"}, "vehicle electrical repair"),
+    "car_service":       ({"errands"}, "vehicle electrical repair"),
+    "motorcycle_repair": ({"errands"}, "vehicle electrical repair"),
     "tyres":             ({"errands"}, "vehicle electrical repair"),
     "laundry":           ({"errands"}, "customer oriented services"),
     "dry_cleaning":      ({"errands"}, "customer oriented services"),
     "hairdresser":       ({"errands"}, "customer oriented services"),
     "beauty":            ({"errands"}, "customer oriented services"),
     "tattoo":            ({"errands"}, "customer oriented services"),
+    "piercing":          ({"errands"}, "customer oriented services"),
     "pet_grooming":      ({"errands"}, "customer oriented services"),
-    "optician":          ({"errands"}, "customer oriented services"),
-    # Fitted medical devices sold with a professional service component —
-    # treated like `optician`, the closest analogue.
-    "hearing_aids":      ({"errands"}, "customer oriented services"),
-    "medical_supply":    ({"errands"}, "customer oriented services"),
+    "computer_repair":   ({"errands"}, "customer oriented services"),
+    "gold_buyer":        ({"errands"}, "customer oriented services"),
+    "printing":          ({"errands"}, "business oriented services"),
+    # Durable goods sold with a fitting or a test: both purposes.
+    "optician":          ({"retail_non_daily", "errands"}, "customer oriented services"),
+    "hearing_aids":      ({"retail_non_daily", "errands"}, "customer oriented services"),
+    "medical_supply":    ({"retail_non_daily", "errands"}, "customer oriented services"),
     "funeral_directors": ({"errands"}, "customer oriented services"),
     "travel_agency":     ({"errands"}, "customer oriented services"),
     "ticket":            ({"errands"}, "customer oriented services"),
@@ -365,10 +427,12 @@ SHOP_RULES = {
     "tailor":            ({"errands"}, "craft businesses"),
     "shoe_repair":       ({"errands"}, "craft businesses"),
     "locksmith":         ({"errands"}, "craft businesses"),
-    "copyshop":          ({"errands", "business"}, "business oriented services"),
-    "estate_agent":      ({"business"}, "business oriented services"),
-    "insurance":         ({"business"}, "business oriented services"),
+    # Agencies for private clients: a visit settles a matter (errands).
+    "copyshop":          ({"errands"}, "business oriented services"),
+    "estate_agent":      ({"errands"}, "customer oriented services"),
+    "insurance":         ({"errands"}, "customer oriented services"),
     "storage_rental":    (set(), None),   # self-storage: unstaffed
+    "vending_machine":   (set(), None),
 
     # shop=yes states that it IS retail but not which kind — so it gets the
     # generic `retail` class, exactly as building=retail does.
@@ -377,6 +441,11 @@ SHOP_RULES = {
     "vacant":            (set(), None),
     "empty":             (set(), None),
 }
+
+# The long tail of shop=* (about 120 values in this region, most of them once:
+# wool, frame, lighting, flooring ...) is specialty goods. Daily goods and
+# service premises are listed above; every other value takes this row.
+SHOP_DEFAULT = ({"retail_non_daily"}, "retail small scale")
 
 # ── LAYER 1c — tourism=* ─────────────────────────────────────────────────
 # Accommodation keeps `leisure`: hotels host resident-facing functions (bars,
@@ -388,6 +457,7 @@ TOURISM_RULES = {
     "chalet":      ({"leisure"}, "hotels"),
     "apartment":   ({"leisure"}, "hotels"),
     "motel":       ({"leisure"}, "hotels"),
+    "camp_site":   ({"leisure"}, "hotels"),
     "museum":      ({"leisure"}, "entertainment culture"),
     "gallery":     ({"leisure"}, "entertainment culture"),
     "theme_park":  ({"leisure"}, "theme parks"),
@@ -438,9 +508,10 @@ BUILDING_TAG_RULES = {
     "grandstand": (set(), None),    # open-air, no enclosed volume
     "pavilion": (set(), None),
 
-    # Commercial / industrial
-    "commercial":   ({"work", "business"}, "services"),
-    "office":       ({"work", "business"}, "normal office"),
+    # Commercial / industrial. `business` is a visitor's professional matter;
+    # a footprint type says nothing about visitors, so only `work`.
+    "commercial":   ({"work"}, "services"),
+    "office":       ({"work"}, "normal office"),
     "retail":       ({"retail_daily", "retail_non_daily"}, "retail"),
     "supermarket":  ({"retail_daily"}, "discount stores"),
     "kiosk":        ({"retail_daily"}, "retail small scale"),
@@ -452,13 +523,15 @@ BUILDING_TAG_RULES = {
     "hangar":       ({"work"}, "yards depots storage areas construction yards"),
 
     # Religious — one answer for the whole family (see ALKIS 3041/3043/3045).
-    "church":    ({"meetup", "leisure"}, "public facilities"),
-    "chapel":    ({"meetup", "leisure"}, "public facilities"),
-    "cathedral": ({"meetup", "leisure"}, "public facilities"),
-    "mosque":    ({"meetup", "leisure"}, "public facilities"),
-    "synagogue": ({"meetup", "leisure"}, "public facilities"),
-    "temple":    ({"meetup", "leisure"}, "public facilities"),
-    "religious": ({"meetup", "leisure"}, "public facilities"),
+    # A place people visit to gather in their free time: culture, not a public
+    # facility (education, research, health, care).
+    "church":    ({"meetup"}, "entertainment culture"),
+    "chapel":    ({"meetup"}, "entertainment culture"),
+    "cathedral": ({"meetup"}, "entertainment culture"),
+    "mosque":    ({"meetup"}, "entertainment culture"),
+    "synagogue": ({"meetup"}, "entertainment culture"),
+    "temple":    ({"meetup"}, "entertainment culture"),
+    "religious": ({"meetup"}, "entertainment culture"),
 
     # Education & health
     "school":       ({"school"}, "schools"),
@@ -467,12 +540,12 @@ BUILDING_TAG_RULES = {
     "kindergarten": ({"childcare"}, "kindergartens"),
     "hospital":     ({"errands"}, "hospitals"),
 
-    # Public
-    "public":         ({"errands"}, "public facilities"),
-    "civic":          ({"errands"}, "public facilities"),
-    "government":     ({"errands"}, "public facilities"),
-    "community_centre": ({"meetup", "leisure"}, "public facilities"),
-    "fire_station":   ({"work"}, "public facilities"),
+    # Public. A generic public building says nothing about visitors.
+    "public":         (set(), "services"),
+    "civic":          (set(), "services"),
+    "government":     (set(), "normal office"),
+    "community_centre": ({"meetup"}, "entertainment culture"),
+    "fire_station":   ({"work"}, "yards depots storage areas construction yards"),
     "train_station":  ({"errands"}, "transport"),
     "transportation": ({"errands"}, "transport"),
     "railway":        ({"work"}, "transport"),
@@ -496,41 +569,82 @@ INFORMATION_RULES = {
 # ── LAYER 1f — key:value tags recovered from `additional_information` ─────
 # Genuine OSM tag vocabulary (office=*, craft=*, social_facility=*), not names.
 # Low counts in this dataset but region-independent.
+# Offices. Most receive no walk-in visitors: their staff work there, and an
+# occasional professional visit is not a main purpose, so they carry no label
+# (work is added centrally). Offices that private clients visit to settle a
+# matter (an insurance agent, a lawyer, a tax adviser, a job centre) carry
+# errands. Any office=* value not listed takes OFFICE_DEFAULT.
 OFFICE_KV_RULES = {
-    "government":            ({"errands"}, "public facilities"),
-    "administrative":        ({"business"}, "normal office"),
-    "association":           ({"business"}, "normal office"),
-    "ngo":                   ({"business"}, "normal office"),
-    "political_party":       ({"business"}, "normal office"),
-    "diplomatic":            ({"business"}, "normal office"),
-    "religion":              ({"meetup"}, "normal office"),
-    "company":               ({"business"}, "normal office"),
-    "telecommunication":     ({"business"}, "normal office"),
-    "newspaper":             ({"business"}, "normal office"),
-    "insurance":             ({"business"}, "business oriented services"),
-    "lawyer":                ({"business"}, "business oriented services"),
-    "notary":                ({"business"}, "business oriented services"),
-    "accountant":            ({"business"}, "business oriented services"),
-    "tax_advisor":           ({"business"}, "business oriented services"),
-    "financial":             ({"business"}, "business oriented services"),
-    "financial_advisor":     ({"business"}, "business oriented services"),
-    "consulting":            ({"business"}, "business oriented services"),
-    "estate_agent":          ({"business", "errands"}, "customer oriented services"),
+    "government":            (set(), "normal office"),
+    "administrative":        (set(), "normal office"),
+    "association":           (set(), "normal office"),
+    "ngo":                   (set(), "normal office"),
+    "political_party":       (set(), "normal office"),
+    "politician":            (set(), "normal office"),
+    "diplomatic":            (set(), "normal office"),
+    "company":               (set(), "normal office"),
+    "telecommunication":     (set(), "normal office"),
+    "newspaper":             (set(), "normal office"),
+    "cooperative":           (set(), "normal office"),
+    "union":                 (set(), "normal office"),
+    "foundation":            (set(), "normal office"),
+    "chamber":               (set(), "normal office"),
+    "property_management":   (set(), "normal office"),
+    "religion":              ({"errands"}, "normal office"),   # a parish office
+    "parish":                ({"errands"}, "normal office"),
+    "registration":          ({"errands"}, "normal office"),
+    "insurance":             ({"errands"}, "customer oriented services"),
+    "estate_agent":          ({"errands"}, "customer oriented services"),
+    "travel_agent":          ({"errands"}, "customer oriented services"),
     "employment_agency":     ({"errands"}, "customer oriented services"),
+    "lawyer":                ({"errands"}, "business oriented services"),
+    "notary":                ({"errands"}, "business oriented services"),
+    "accountant":            ({"errands"}, "business oriented services"),
+    "tax_advisor":           ({"errands"}, "business oriented services"),
+    "financial_advisor":     ({"errands"}, "business oriented services"),
+    "financial":             (set(), "business oriented services"),
+    "consulting":            (set(), "business oriented services"),
+    "it":                    (set(), "business oriented services"),
+    "engineering":           (set(), "business oriented services"),
+    "engineer":              (set(), "business oriented services"),
+    "architect":             (set(), "business oriented services"),
+    "surveyor":              (set(), "business oriented services"),
+    "geodesist":             (set(), "business oriented services"),
+    "advertising_agency":    (set(), "business oriented services"),
+    "marketing":             (set(), "business oriented services"),
+    "graphic_design":        (set(), "business oriented services"),
+    "web_design":            (set(), "business oriented services"),
+    "design":                (set(), "business oriented services"),
+    "translator":            (set(), "business oriented services"),
+    "event_management":      (set(), "business oriented services"),
+    "coworking":             (set(), "open plan office"),
     "physician":             ({"errands"}, "customer oriented services"),
     "therapist":             ({"errands"}, "customer oriented services"),
-    "it":                    ({"business"}, "open plan office"),
-    "engineering":           ({"business"}, "open plan office"),
-    "architect":             ({"business"}, "open plan office"),
-    "coworking":             ({"business"}, "open plan office"),
+    "physiotherapist":       ({"errands"}, "customer oriented services"),
+    "psychotherapist":       ({"errands"}, "customer oriented services"),
+    "psychologist":          ({"errands"}, "customer oriented services"),
+    "healer":                ({"errands"}, "customer oriented services"),
+    "podologist":            ({"errands"}, "customer oriented services"),
+    "midwife":               ({"errands"}, "customer oriented services"),
+    "healthcare":            ({"errands"}, "customer oriented services"),
+    "hairdresser":           ({"errands"}, "customer oriented services"),
+    "nursing_service":       ({"work"}, "customer oriented services"),  # staff go out to clients
     "research":              ({"work"}, "research institutes"),
+    "research_institute":    ({"work"}, "research institutes"),
+    "university":            ({"university"}, "universities"),
     "educational_institution": ({"lessons"}, "schools"),
+    "coaching":              ({"lessons"}, "customer oriented services"),
     "logistics":             ({"work"}, "yards depots storage areas construction yards"),
     "moving_company":        ({"work"}, "yards depots storage areas construction yards"),
     "energy_supplier":       ({"work"}, "industrial operations production"),
     "water_utility":         ({"work"}, "industrial operations production"),
+    "vacant":                (set(), None),
 }
+OFFICE_DEFAULT = (set(), "normal office")
 
+# Crafts are skilled manual work by small businesses: staff only unless the
+# customer comes for the result (a tailor, a key cutter). Any craft=* value not
+# listed takes CRAFT_DEFAULT.
 CRAFT_KV_RULES = {
     "bakery":         ({"retail_daily"}, "craft businesses"),
     "butcher":        ({"retail_daily"}, "craft businesses"),
@@ -551,60 +665,188 @@ CRAFT_KV_RULES = {
     "tailor":         ({"errands"}, "craft businesses"),
     "shoemaker":      ({"errands"}, "craft businesses"),
     "watchmaker":     ({"errands"}, "craft businesses"),
+    "clockmaker":     ({"errands"}, "craft businesses"),
     "jeweller":       ({"errands"}, "craft businesses"),
+    "dressmaker":     ({"errands"}, "craft businesses"),
+    "key_cutter":     ({"errands"}, "craft businesses"),
+    "locksmith":      ({"errands"}, "craft businesses"),
+    "confectionery":  ({"retail_daily"}, "craft businesses"),
+    "sawmill":        ({"work"}, "others industrial"),
 }
+CRAFT_DEFAULT = ({"work"}, "craft businesses")
 
+# Care homes and the like: residents are visited (meetup).
 SOCIAL_FACILITY_KV_RULES = {
     "shelter":         ({"errands"}, "nursing homes"),
-    "group_home":      ({"errands"}, "nursing homes"),
-    "nursing_home":    ({"errands"}, "nursing homes"),
-    "assisted_living": ({"errands"}, "nursing homes"),
+    "group_home":      ({"meetup"}, "nursing homes"),
+    "nursing_home":    ({"meetup"}, "nursing homes"),
+    "assisted_living": ({"meetup"}, "nursing homes"),
+    "hospice":         ({"meetup"}, "nursing homes"),
+    "day_centre":      ({"meetup"}, "nursing homes"),
     "ambulatory_care": ({"errands"}, "hospitals"),
     "outreach":        ({"errands"}, "customer oriented services"),
+    "advice":          ({"errands"}, "customer oriented services"),
     "food_bank":       ({"errands"}, "customer oriented services"),
+    "clothing_bank":   ({"errands"}, "customer oriented services"),
+    "workshop":        ({"work"}, "others industrial"),   # sheltered workshop
     "day_care":        ({"childcare"}, "kindergartens"),
+    "childrens_centre": ({"childcare"}, "kindergartens"),
+    "social_club":     ({"meetup"}, "entertainment culture"),
 }
+SOCIAL_FACILITY_DEFAULT = ({"errands"}, "customer oriented services")
+
+# ── LAYER 1g — leisure=* ─────────────────────────────────────────────────
+# Sports venues are sports; fun venues and wellness are leisure. Open-air
+# features (a park, a playground) are no building and carry nothing. No default:
+# the values are too diverse for one.
+LEISURE_RULES = {
+    "sports_centre":   ({"sports"}, "fitness wellness"),
+    "sports_hall":     ({"sports"}, "fitness wellness"),
+    "fitness_centre":  ({"sports"}, "fitness wellness"),
+    "swimming_pool":   ({"sports"}, "fitness wellness"),
+    "ice_rink":        ({"sports"}, "fitness wellness"),
+    "horse_riding":    ({"sports"}, "fitness wellness"),
+    "shooting_ground": ({"sports"}, "fitness wellness"),
+    "shooting-ground": ({"sports"}, "fitness wellness"),
+    "golf_course":     ({"sports"}, "fitness wellness"),
+    "pitch":           ({"sports"}, "fitness wellness"),
+    "track":           ({"sports"}, "fitness wellness"),
+    "sport":           ({"sports"}, "fitness wellness"),
+    "dojo":            ({"sports"}, "fitness wellness"),
+    "trampoline_park": ({"sports", "leisure"}, "large discos fun leisure pools"),
+    "water_park":      ({"sports", "leisure"}, "large discos fun leisure pools"),
+    "stadium":         ({"sports", "leisure"}, "arenas large events"),
+    "sauna":           ({"leisure"}, "fitness wellness"),
+    "spa":             ({"leisure"}, "fitness wellness"),
+    "bowling_alley":   ({"leisure"}, "large discos fun leisure pools"),
+    "amusement_arcade": ({"leisure"}, "customer oriented services"),
+    "adult_gaming_centre": ({"leisure"}, "customer oriented services"),
+    "escape_game":     ({"leisure"}, "entertainment culture"),
+    "indoor_play":     ({"leisure"}, "entertainment culture"),
+    "miniature_golf":  ({"leisure"}, "facilities for culture leisure and sports"),
+    "marina":          ({"leisure"}, "facilities for culture leisure and sports"),
+    "resort":          ({"leisure"}, "hotels"),
+    "beach_resort":    ({"leisure"}, "hotels"),
+    "hackerspace":     ({"meetup"}, "entertainment culture"),
+    "dance":           ({"lessons", "leisure"}, "customer oriented services"),
+    "tanning_salon":   ({"errands"}, "customer oriented services"),
+    "playground": (set(), None), "park": (set(), None), "garden": (set(), None),
+    "outdoor_seating": (set(), None), "bleachers": (set(), None), "bandstand": (set(), None),
+    "schoolyard": (set(), None), "firepit": (set(), None), "picnic_table": (set(), None),
+    "nature_reserve": (set(), None), "common": (set(), None), "dog_park": (set(), None),
+    "slipway": (set(), None), "swimming_area": (set(), None), "fishing": (set(), None),
+    "bird_hide": (set(), None),
+}
+
+# ── LAYER 1h — healthcare=* ──────────────────────────────────────────────
+# Practices and therapies: a visit is a task with a clear outcome (errands).
+HEALTHCARE_RULES = {
+    "hospital":       ({"errands"}, "hospitals"),
+    "clinic":         ({"errands"}, "hospitals"),
+    "rehabilitation": ({"errands"}, "hospitals"),
+    "dialysis":       ({"errands"}, "hospitals"),
+    "hospice":        ({"meetup"}, "nursing homes"),
+    "pharmacy":       ({"retail_daily"}, "customer oriented services"),
+    "laboratory":     ({"work"}, "business oriented services"),
+}
+HEALTHCARE_DEFAULT = ({"errands"}, "customer oriented services")
+
+# ── LAYER 1i — club=* ────────────────────────────────────────────────────
+# A club's house is where members meet; a sports club's is where they train.
+CLUB_RULES = {
+    "sport":    ({"sports"}, "fitness wellness"),
+    "shooting": ({"sports"}, "fitness wellness"),
+    "sailing":  ({"sports"}, "fitness wellness"),
+    "yachting": ({"sports"}, "fitness wellness"),
+    "gliding":  ({"sports"}, "fitness wellness"),
+}
+CLUB_DEFAULT = ({"meetup"}, "entertainment culture")
+
+# ── LAYER 1j — sport=* ───────────────────────────────────────────────────
+# Any sport played at a place makes it a place of sport; table and bar games
+# are leisure.
+SPORT_RULES = {
+    "billiards":    ({"leisure"}, "facilities for culture leisure and sports"),
+    "billard":      ({"leisure"}, "facilities for culture leisure and sports"),
+    "darts":        ({"leisure"}, "facilities for culture leisure and sports"),
+    "dart":         ({"leisure"}, "facilities for culture leisure and sports"),
+    "table_soccer": ({"leisure"}, "facilities for culture leisure and sports"),
+    "kicker":       ({"leisure"}, "facilities for culture leisure and sports"),
+    "chess":        ({"leisure"}, "facilities for culture leisure and sports"),
+}
+SPORT_DEFAULT = ({"sports"}, "fitness wellness")
+
+# A building holding this many of its own shops (not counting its site) is a
+# shopping centre: the class definition counts "on the order of ten or more"
+# separate shops.
+SHOPPING_CENTRE_MIN_SHOPS = 10
 
 
 # ── LAYER 1 driver ───────────────────────────────────────────────────────
 
-def _lookup_all(values, table):
+def _lookup_all(values, table, default=None):
     """Look up every value against `table`, returning only real hits.
 
     An entry of (set(), None) is NOT a hit: it means "explicitly no activity",
     so the building falls through to the next layer exactly as it would with
     no tag at all. That is what makes the explicit-null entries above safe to
     add for documentation purposes.
+
+    `default` is the answer for a value the table does not list, for keys whose
+    values all share one meaning (any shop=* sells goods, any office=* is office
+    work); without it an unlisted value is no hit.
     """
     hits = []
     for v in values:
         key = str(v).strip().lower()
         if key in table:
             labels, cls = table[key]
-            if labels or cls:
-                hits.append((labels, cls))
+        elif default is not None:
+            labels, cls = default
+        else:
+            continue
+        if labels or cls:
+            hits.append((labels, cls))
     return hits
+
+
+# key -> (table, default) for the POI tags read as lists of values
+TAG_KEYS = {
+    "amenity":     (AMENITY_RULES, None),
+    "shop":        (SHOP_RULES, SHOP_DEFAULT),
+    "tourism":     (TOURISM_RULES, None),
+    "building":    (BUILDING_TAG_RULES, None),
+    "information": (INFORMATION_RULES, None),
+    "leisure":     (LEISURE_RULES, None),
+    "healthcare":  (HEALTHCARE_RULES, HEALTHCARE_DEFAULT),
+    "club":        (CLUB_RULES, CLUB_DEFAULT),
+    "sport":       (SPORT_RULES, SPORT_DEFAULT),
+}
+# key -> (table, default) for the key:value pairs in additional_information
+KV_KEYS = {
+    "office":          (OFFICE_KV_RULES, OFFICE_DEFAULT),
+    "craft":           (CRAFT_KV_RULES, CRAFT_DEFAULT),
+    "social_facility": (SOCIAL_FACILITY_KV_RULES, SOCIAL_FACILITY_DEFAULT),
+}
 
 
 def classify_from_tags(row):
     hits = []
-    hits += _lookup_all(as_list(row.get("amenity")), AMENITY_RULES)
-    hits += _lookup_all(as_list(row.get("shop")), SHOP_RULES)
-    hits += _lookup_all(as_list(row.get("tourism")), TOURISM_RULES)
-    hits += _lookup_all(as_list(row.get("building")), BUILDING_TAG_RULES)
-    hits += _lookup_all(as_list(row.get("information")), INFORMATION_RULES)
+    for key, (table, default) in TAG_KEYS.items():
+        hits += _lookup_all(as_list(row.get(key)), table, default)
 
     extra = parse_additional_information(row.get("additional_information"))
-    if "office" in extra:
-        hits += _lookup_all([extra["office"]], OFFICE_KV_RULES)
-    if "craft" in extra:
-        hits += _lookup_all([extra["craft"]], CRAFT_KV_RULES)
-    if "social_facility" in extra:
-        hits += _lookup_all([extra["social_facility"]], SOCIAL_FACILITY_KV_RULES)
+    for key, (table, default) in KV_KEYS.items():
+        if key in extra:
+            hits += _lookup_all([extra[key]], table, default)
 
     if not hits:
         return None
-    return reconcile_multi_poi(hits)
+    mid_labels, cls = reconcile_multi_poi(hits)
+    n_shops = row.get("shop_count")
+    if not is_missing(n_shops) and int(n_shops) >= SHOPPING_CENTRE_MIN_SHOPS:
+        cls = "shopping centers"
+    return mid_labels, cls
 
 
 def reconcile_multi_poi(hits):
@@ -675,41 +917,46 @@ ALKIS_RULES = {
     # left as generic commercial on purpose so the ceiling is measurable.
     # Its Bosserhof class is refined by land use below — the only refinement
     # in the pipeline, and it uses an OSM tag, not volume.
-    "31001_2000": ({"work", "business"}, "services"),  # Gebäude f. Wirtschaft/Gewerbe  244,607
-    "31001_2010": ({"work", "business"}, "services"),  # Gebäude f. Handel u. Dienstl.    7,414
-    "31001_1120": ({"work", "business"}, "services"),  # Wohnen + Handel/Dienstl.         5,338
-    "31001_2310": ({"work", "business"}, "services"),  # Handel/Dienstl. + Wohnen           956
+    "31001_2000": ({"work"}, "services"),  # Gebäude f. Wirtschaft/Gewerbe  244,607
+    "31001_2010": ({"work"}, "services"),  # Gebäude f. Handel u. Dienstl.    7,414
+    "31001_1120": ({"work"}, "services"),  # Wohnen + Handel/Dienstl.         5,338
+    "31001_2310": ({"work"}, "services"),  # Handel/Dienstl. + Wohnen           956
     #   No retail label on these. "Handel" does imply trade, but attaching
     #   retail_non_daily to 13,708 generic buildings would swamp the 1,832
     #   buildings actually tagged as shops (84% of the column would come from
     #   here). Both retail columns are fed only by real shop tags.
+    #   No business label either: a code says nothing about visitors, and
+    #   business is a visitor's professional matter, not the staff's work.
     #   Mixed residential+commercial codes get the same answer as their pure
     #   counterpart: the building does host the business, and notebook 07
     #   normalises to zone totals, so only relative weight matters.
 
-    "31001_2100": ({"work", "business"}, "industrial operations production"),  # Gewerbe u. Industrie  7,953
-    "31001_1130": ({"work", "business"}, "industrial operations production"),  # Wohnen + Gewerbe/Ind.   611
-    "31001_2320": ({"work", "business"}, "industrial operations production"),  # Gewerbe/Ind. + Wohnen   115
+    "31001_2100": ({"work"}, "industrial operations production"),  # Gewerbe u. Industrie  7,953
+    "31001_1130": ({"work"}, "industrial operations production"),  # Wohnen + Gewerbe/Ind.   611
+    "31001_2320": ({"work"}, "industrial operations production"),  # Gewerbe/Ind. + Wohnen   115
 
     # ── Public administration ───────────────────────────────────────────────
-    # The generic code gets the same answer as its specific siblings.
-    "31001_3000": ({"errands"}, "public facilities"),  # Gebäude f. öffentliche Zwecke  2,851
-    "31001_3100": ({"errands"}, "public facilities"),  # öffentl. Zwecke + Wohnen         131
-    "31001_3012": ({"errands"}, "public facilities"),  # Rathaus                           91
-    "31001_3071": ({"errands"}, "public facilities"),  # Polizei                           83
-    "31001_3015": ({"errands"}, "public facilities"),  # Gericht                           24
-    "31001_3017": ({"errands"}, "public facilities"),  # Kreisverwaltung                   24
-    "31001_3019": ({"errands"}, "public facilities"),  # Finanzamt                          5
-    "31001_3011": ({"errands"}, "public facilities"),  # Parlament                          2
-    # Staff only — no public counter.
-    "31001_3072": ({"work"}, "public facilities"),     # Feuerwehr                        656
+    # Administration is office work (Services); Public facilities is for
+    # education, research, health and care. The generic code says nothing
+    # about visitors; the specific ones have a counter people visit.
+    "31001_3000": ({"work"}, "services"),                      # Gebäude f. öffentliche Zwecke  2,851
+    "31001_3100": ({"work"}, "services"),                      # öffentl. Zwecke + Wohnen         131
+    "31001_3012": ({"errands"}, "customer oriented services"), # Rathaus                           91
+    "31001_3071": ({"errands"}, "normal office"),              # Polizei                           83
+    "31001_3015": ({"errands"}, "normal office"),              # Gericht                           24
+    "31001_3017": ({"errands"}, "normal office"),              # Kreisverwaltung                   24
+    "31001_3019": ({"errands"}, "normal office"),              # Finanzamt                          5
+    "31001_3011": ({"work"}, "normal office"),                 # Parlament                          2
+    # Staff only — no public counter. A fire station keeps and dispatches
+    # vehicles and equipment.
+    "31001_3072": ({"work"}, "yards depots storage areas construction yards"),  # Feuerwehr  656
     "31001_3075": ({"work"}, "public facilities"),     # Justizvollzugsanstalt             23
     #   Inmates are residents, not visitors, so no errands claim.
 
     # ── Religious ───────────────────────────────────────────────────────────
-    "31001_3041": ({"meetup", "leisure"}, "public facilities"),  # Kirche       691
-    "31001_3043": ({"meetup", "leisure"}, "public facilities"),  # Kapelle      481
-    "31001_3045": ({"meetup", "leisure"}, "public facilities"),  # Gotteshaus    55
+    "31001_3041": ({"meetup"}, "entertainment culture"),  # Kirche       691
+    "31001_3043": ({"meetup"}, "entertainment culture"),  # Kapelle      481
+    "31001_3045": ({"meetup"}, "entertainment culture"),  # Gotteshaus    55
 
     # ── Education & research ────────────────────────────────────────────────
     "31001_3021": ({"school"}, "schools"),                 # Allgemeinbild. Schule  782
@@ -719,7 +966,7 @@ ALKIS_RULES = {
 
     # ── Health & care ───────────────────────────────────────────────────────
     "31001_3051": ({"errands"}, "hospitals"),              # Krankenhaus            136
-    "31001_1110": ({"errands"}, "nursing homes"),           # Wohngeb. m. Gemeinbedarf 107
+    "31001_1110": ({"meetup"}, "nursing homes"),            # Wohngeb. m. Gemeinbedarf 107
 
     # ── Sport ───────────────────────────────────────────────────────────────
     "31001_3211": ({"sports"}, "fitness wellness"),        # Sporthalle             462
@@ -805,7 +1052,7 @@ def classify_from_alkis(row):
 # ══════════════════════════════════════════════════════════════════════════
 
 OSM_LANDUSE_FALLBACK = {
-    "commercial": ({"work", "business"}, "services"),
+    "commercial": ({"work"}, "services"),
     "industrial": ({"work"}, "industrial operations production"),
     "retail":     ({"retail_daily", "retail_non_daily"}, "retail"),
 }
@@ -884,8 +1131,16 @@ _ALL_TAG_TABLES = {
     "OFFICE_KV_RULES": OFFICE_KV_RULES,
     "CRAFT_KV_RULES": CRAFT_KV_RULES,
     "SOCIAL_FACILITY_KV_RULES": SOCIAL_FACILITY_KV_RULES,
+    "LEISURE_RULES": LEISURE_RULES,
+    "HEALTHCARE_RULES": HEALTHCARE_RULES,
+    "CLUB_RULES": CLUB_RULES,
+    "SPORT_RULES": SPORT_RULES,
     "ALKIS_RULES": ALKIS_RULES,
     "OSM_LANDUSE_FALLBACK": OSM_LANDUSE_FALLBACK,
+    # the defaults, as one-row tables so that every check covers them too
+    "KEY_DEFAULTS": {"shop": SHOP_DEFAULT, "office": OFFICE_DEFAULT, "craft": CRAFT_DEFAULT,
+                     "social_facility": SOCIAL_FACILITY_DEFAULT, "healthcare": HEALTHCARE_DEFAULT,
+                     "club": CLUB_DEFAULT, "sport": SPORT_DEFAULT},
 }
 
 

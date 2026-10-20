@@ -211,25 +211,42 @@ class TestAlkisCodeTable:
         """Kirche / Kapelle / Gotteshaus are one building type and must get one
         answer. A regex that matches two of the three would split them."""
         r = classify(function=code)
-        assert set(r["mid_labels"]) == {"meetup", "leisure", "work"}
-        assert r["bosserhof_class"] == "public facilities"
+        assert set(r["mid_labels"]) == {"meetup", "work"}
+        assert r["bosserhof_class"] == "entertainment culture"
 
-    @pytest.mark.parametrize("code", [
-        "31001_3000", "31001_3100", "31001_3012", "31001_3071",
-        "31001_3015", "31001_3017", "31001_3019", "31001_3011",
+    def test_osm_places_of_worship_agree_with_alkis(self):
+        alkis = classify(function="31001_3041")
+        for row in ({"amenity": "place_of_worship"}, {"building": "church"}, {"osm_building_type": "chapel"}):
+            r = classify(**row)
+            assert (r["mid_labels"], r["bosserhof_class"]) == (alkis["mid_labels"], alkis["bosserhof_class"]), row
+
+    @pytest.mark.parametrize("code,labels,cls", [
+        ("31001_3000", {"work"}, "services"),
+        ("31001_3100", {"work"}, "services"),
+        ("31001_3012", {"errands", "work"}, "customer oriented services"),
+        ("31001_3071", {"errands", "work"}, "normal office"),
+        ("31001_3015", {"errands", "work"}, "normal office"),
+        ("31001_3017", {"errands", "work"}, "normal office"),
+        ("31001_3019", {"errands", "work"}, "normal office"),
+        ("31001_3011", {"work"}, "normal office"),
     ])
-    def test_public_family_is_consistent(self, code):
-        """The generic public code must agree with its specific siblings."""
+    def test_administration_is_services_not_public_facilities(self, code, labels, cls):
+        """Public facilities is education, research, health and care; an
+        administration is office work. A counter people visit is errands; the
+        generic public code says nothing about visitors."""
         r = classify(function=code)
-        assert set(r["mid_labels"]) == {"errands", "work"}
-        assert r["bosserhof_class"] == "public facilities"
+        assert set(r["mid_labels"]) == labels
+        assert r["bosserhof_class"] == cls
 
-    @pytest.mark.parametrize("code", ["31001_3072", "31001_3075"])
-    def test_staff_only_public_codes(self, code):
+    @pytest.mark.parametrize("code,cls", [
+        ("31001_3072", "yards depots storage areas construction yards"),
+        ("31001_3075", "public facilities"),
+    ])
+    def test_staff_only_public_codes(self, code, cls):
         """Feuerwehr and Justizvollzugsanstalt generate staff trips only."""
         r = classify(function=code)
         assert r["mid_labels"] == ["work"]
-        assert r["bosserhof_class"] == "public facilities"
+        assert r["bosserhof_class"] == cls
 
     @pytest.mark.parametrize("code", ["31001_2100", "31001_1130", "31001_2320"])
     def test_specific_industrial_codes_are_not_services(self, code):
@@ -261,7 +278,7 @@ class TestGenericAlkisEmitsNoRetail:
         assert "retail_daily" not in r["mid_labels"]
         assert "retail_non_daily" not in r["mid_labels"]
         assert "errands" not in r["mid_labels"]
-        assert set(r["mid_labels"]) == {"work", "business"}
+        assert set(r["mid_labels"]) == {"work"}
 
 
 class TestLanduseRefinement:
@@ -291,7 +308,7 @@ class TestLanduseRefinement:
     def test_refinement_never_changes_the_mid_labels(self):
         for lu in ("industrial", "retail", "commercial", "residential", None):
             r = classify(function="31001_2000", osm_landuse_class=lu)
-            assert set(r["mid_labels"]) == {"work", "business"}
+            assert set(r["mid_labels"]) == {"work"}
 
 
 # ── Tag-value normalisation ───────────────────────────────────────────────────
@@ -315,7 +332,7 @@ class TestCompositeTagValues:
         assert as_list(raw) == expected
 
     @pytest.mark.parametrize("value,label,cls", [
-        ("church;yes", "meetup", "public facilities"),
+        ("church;yes", "meetup", "entertainment culture"),
         ("school;yes", "school", "schools"),
         ("retail;yes", "retail_daily", "retail"),
         ("industrial;yes", "work", "industrial operations production"),
@@ -327,7 +344,7 @@ class TestCompositeTagValues:
 
     def test_kv_pairs_still_parse_after_the_split_change(self):
         r = classify(additional_information="office: lawyer; craft: bakery")
-        assert "business" in r["mid_labels"]
+        assert {"errands", "retail_daily"} <= set(r["mid_labels"])
         assert r["bosserhof_class"] is not None
 
 
@@ -449,3 +466,107 @@ class TestMultiPoiReconciliation:
         assert "leisure" in r["mid_labels"]
         assert "retail_daily" in r["mid_labels"]
         assert r["bosserhof_class"] == "retail small scale"  # 3.75 > 1.9
+
+
+# ── The label-definition rework: business, new keys, key defaults ────────────
+
+class TestBusinessIsAVisitorPurpose:
+    """business is a visitor's professional matter, not the staff's work: no
+    rule derived from a code, a footprint or a plain office claims it."""
+
+    @pytest.mark.parametrize("row", [
+        {"function": "31001_2000"}, {"function": "31001_2100"}, {"osm_building_type": "commercial"},
+        {"osm_building_type": "office"}, {"osm_landuse_class": "commercial"},
+        {"additional_information": "office: company"}, {"additional_information": "office: it"},
+    ])
+    def test_no_business_without_visitors(self, row):
+        assert "business" not in classify(**row)["mid_labels"]
+
+    @pytest.mark.parametrize("row", [
+        {"amenity": "conference_centre"}, {"amenity": "exhibition_centre"}, {"shop": "wholesale"},
+        {"function": "31001_2060"},
+    ])
+    def test_business_where_professionals_visit(self, row):
+        assert "business" in classify(**row)["mid_labels"]
+
+
+class TestNewTagKeys:
+    @pytest.mark.parametrize("key,value,label,cls", [
+        ("leisure", "sports_centre", "sports", "fitness wellness"),
+        ("leisure", "fitness_centre", "sports", "fitness wellness"),
+        ("leisure", "water_park", "sports", "large discos fun leisure pools"),
+        ("leisure", "dance", "lessons", "customer oriented services"),
+        ("leisure", "sauna", "leisure", "fitness wellness"),
+        ("healthcare", "physiotherapist", "errands", "customer oriented services"),
+        ("healthcare", "hospice", "meetup", "nursing homes"),
+        ("club", "sport", "sports", "fitness wellness"),
+        ("club", "culture", "meetup", "entertainment culture"),
+        ("sport", "shooting", "sports", "fitness wellness"),
+        ("sport", "billiards", "leisure", "facilities for culture leisure and sports"),
+    ])
+    def test_key_is_read(self, key, value, label, cls):
+        r = classify(**{key: value})
+        assert r["interpreted_type"] == "poi_tags"
+        assert label in r["mid_labels"]
+        assert r["bosserhof_class"] == cls
+
+    @pytest.mark.parametrize("value", ["playground", "park", "outdoor_seating"])
+    def test_open_air_leisure_is_no_building(self, value):
+        r = classify(leisure=value)
+        assert r["interpreted_type"] == "no_signal"
+
+    def test_composite_sport_values_split(self):
+        r = classify(sport="soccer;tennis")
+        assert r["mid_labels"] == ["sports", "work"]
+
+
+class TestKeyDefaults:
+    """An unlisted value of a key whose values share one meaning takes the key's
+    default row; a key without a default lets it fall through."""
+
+    @pytest.mark.parametrize("row,label,cls", [
+        ({"shop": "wool"}, "retail_non_daily", "retail small scale"),
+        ({"healthcare": "nutrition_counselling"}, "errands", "customer oriented services"),
+        ({"club": "chess"}, "meetup", "entertainment culture"),
+        ({"sport": "pelota"}, "sports", "fitness wellness"),
+        ({"additional_information": "office: lifeguard"}, None, "normal office"),
+        ({"additional_information": "craft: stonemason"}, None, "craft businesses"),
+        ({"additional_information": "social_facility: refugee_camp"}, "errands", "customer oriented services"),
+    ])
+    def test_default(self, row, label, cls):
+        r = classify(**row)
+        assert r["bosserhof_class"] == cls
+        assert label is None or label in r["mid_labels"]
+
+    @pytest.mark.parametrize("row", [{"amenity": "made_up_value"}, {"leisure": "made_up_value"},
+                                     {"tourism": "made_up_value"}])
+    def test_no_default(self, row):
+        assert classify(**row)["interpreted_type"] == "no_signal"
+
+    def test_explicit_null_row_beats_the_default(self):
+        assert classify(shop="vacant")["interpreted_type"] == "no_signal"
+
+
+class TestShoppingCentre:
+    def test_ten_shops_make_a_shopping_centre(self):
+        r = classify(shop=["clothes", "shoes", "bakery"], shop_count=10)
+        assert r["bosserhof_class"] == "shopping centers"
+        assert {"retail_daily", "retail_non_daily"} <= set(r["mid_labels"])
+
+    def test_fewer_shops_keep_the_store_class(self):
+        r = classify(shop=["clothes", "shoes"], shop_count=9)
+        assert r["bosserhof_class"] == "retail small scale"
+
+
+class TestCareAndGathering:
+    @pytest.mark.parametrize("row", [{"amenity": "nursing_home"}, {"amenity": "social_facility"},
+                                     {"additional_information": "social_facility: nursing_home"},
+                                     {"function": "31001_1110"}])
+    def test_care_homes_are_visited(self, row):
+        r = classify(**row)
+        assert "meetup" in r["mid_labels"]
+        assert r["bosserhof_class"] == "nursing homes"
+
+    @pytest.mark.parametrize("value", ["community_centre", "clubhouse", "library"])
+    def test_culture_not_public_facilities(self, value):
+        assert classify(amenity=value)["bosserhof_class"] == "entertainment culture"
