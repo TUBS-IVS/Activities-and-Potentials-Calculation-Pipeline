@@ -25,3 +25,9 @@ pytest>=7.4
 #   Linux:  sudo apt install osmium-tool
 #   Mac:    brew install osmium-tool
 #   Windows/conda: conda install -c conda-forge osmium-tool
+
+# NOTE — optional, Windows only (scripts/12_* and scripts/13_new_validation_workbook.py):
+# with Microsoft Excel and pywin32 installed, the comparison workbooks are recalculated and
+# every stored value is checked against the Python scoring. Without them the workbooks are
+# still written and calculate when opened.
+#   pip install pywin32

@@ -13,7 +13,6 @@ authors:
     given-names: Mayur
     email: m.patel@tu-braunschweig.de
     affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
-    orcid: ""
 repository-code: "https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline"
 license: MIT
 version: "1.0.0"

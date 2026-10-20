@@ -3,7 +3,7 @@
 
 Strips editor-injected metadata that changes every time a notebook is opened,
 WITHOUT touching the stored results. The notebooks in this repository carry
-their cell outputs on purpose: they are the record of the run the README's
+their cell outputs on purpose: they are the record of the run the documentation's
 figures come from, so a blanket `nbstripout` would destroy the thing we want
 to keep.
 

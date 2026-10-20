@@ -355,3 +355,48 @@ ZONE_ACTIVITY_COLUMNS = [
 # OSM buildings: assumed floor height in meters when no height tag exists
 DEFAULT_FLOOR_HEIGHT_M = 2.0
 DEFAULT_FLOORS         = 1
+
+# ──────────────────────────────────────────────
+# RULES ON THE FINAL PIPELINE'S DATA (notebooks 11 and 12)
+# The rule engine runs, unchanged and with its own weights, on the buildings and POIs
+# of the FINAL (LLM) pipeline, so both classifiers answer the same buildings. Their
+# evidence is not identical: no rule reads names, and the LLM's record also gives the
+# city, footprint, height and ALKIS land use, while the engine reads every tag key of
+# a POI where the LLM sees one. FINAL is only read, never written. Edit FINAL_DIR if
+# it lives elsewhere.
+# ──────────────────────────────────────────────
+
+FINAL_DIR = ROOT.parent / "Capacity_Calculation-pipeline-FINAL"
+
+FINAL_BUILDINGS_FILE  = FINAL_DIR / "data" / "output" / "04_buildings_enriched.gpkg"    # layers buildings, building_pois
+FINAL_POIS_FILE       = FINAL_DIR / "data" / "output" / "01_all_pois.gpkg"              # layer pois: every OSM tag of a POI
+FINAL_CLASSIFIED_FILE = FINAL_DIR / "data" / "output" / "06_buildings_classified.gpkg"  # layer buildings: the LLM's answers
+FINAL_VALIDATION_FILE = FINAL_DIR / "data" / "experimental_extract" / "09_validation.gpkg"  # layer units: the truth per building
+# FINAL's catalogue, label maps and scoring functions, so both classifiers are scored by the
+# same code as FINAL's notebook 09 (loaded by file path; they never shadow this config)
+FINAL_CONFIG_FILE     = FINAL_DIR / "config.py"
+FINAL_VALIDATION_LIB  = FINAL_DIR / "lib" / "validation.py"
+
+# Which building-POI pairs of FINAL step 04 feed the engine's POI-tag columns. Own pairs
+# are POIs placed on the building (inside it or snapped to it within 50 m, as a point,
+# a footprint or a unit of a mall); site pairs are the campus, plant or estate polygons
+# that contain it. The LLM sees both. Main run: own + site. Second run: own only, close
+# to how the engine was fed before.
+RULES_ON_FINAL_RUNS = {
+    "sites": ("point", "footprint", "unit", "site"),
+    "own":   ("point", "footprint", "unit"),
+}
+RULES_ON_FINAL_FILE = OUTPUT_DIR / "11_rules_on_final.parquet"
+
+# Notebook 12: paired bootstrap of the activity F1 difference (units resampled with replacement)
+RULES_VS_LLM_BOOTSTRAP = 2000
+RULES_VS_LLM_SEED      = 42
+
+# The validated places side by side for reading - the truth, the LLM's answer, the rules' answer
+# (scripts/12_rules_vs_llm_workbook.py; same units, truth and scoring as notebook 12)
+RULES_VS_LLM_WORKBOOK = OUTPUT_DIR / "12_rules_vs_llm_side_by_side.xlsx"
+
+# Step 13: a new validation of the same places, judged blind in FINAL's label scheme (the old truth leans on the
+# original pipeline's answers); scripts/13_new_validation_*.py write their inputs and results here
+NEW_VALIDATION_DIR = OUTPUT_DIR / "13_new_validation"
+NEW_VALIDATION_WORKBOOK = OUTPUT_DIR / "13_new_validation_side_by_side.xlsx"
