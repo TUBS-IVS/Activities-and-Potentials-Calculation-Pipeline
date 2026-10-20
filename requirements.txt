@@ -1,0 +1,24 @@
+# Python packages — install with: pip install -r requirements.txt
+
+# --- Geospatial ---
+geopandas>=1.0
+pyogrio>=0.7          # GeoPackage I/O in every step
+shapely>=2.0
+pyrosm>=0.6           # parses the clipped OSM PBF (step 01)
+
+# --- Data ---
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0         # parquet intermediates (steps 05-07, rules/)
+
+# --- LLM calls (steps 05, 07) and LoD2 download (step 02) ---
+requests>=2.31
+
+# --- Notebooks and tests ---
+jupyterlab>=4.0
+pytest>=7.4
+
+# System tools, not pip packages:
+#   osmium-tool  (step 01 clips the PBF)   conda install -c conda-forge osmium-tool | apt install osmium-tool
+#   GDAL/ogr2ogr (step 02 merges the tiles) conda install -c conda-forge gdal       | apt install gdal-bin
+# Optional: QGIS (scripts/08_qgis_*.py build and render a review project; run with QGIS's own Python).
