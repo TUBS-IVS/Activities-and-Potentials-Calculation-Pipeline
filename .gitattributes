@@ -1,0 +1,10 @@
+# Force LF line endings on Linux/Mac — prevents CRLF issues when developing on Windows
+* text=auto eol=lf
+
+# Binary files — never touch line endings
+*.gpkg    binary
+*.pbf     binary
+*.parquet binary
+*.xlsx    binary
+*.png     binary
+*.jpg     binary

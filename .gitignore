@@ -1,0 +1,44 @@
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+
+# ── Large input / output data (region-specific, not for version control) ──────
+data/input/*
+!data/input/.gitkeep
+
+data/output/*
+!data/output/.gitkeep
+
+# Throwaway layers made to be looked at in QGIS and then rewritten. Regenerated
+# by notebook 03, hundreds of MB, never an input to anything.
+data/experimental_extract/*
+!data/experimental_extract/.gitkeep
+
+# Reference tables are user-supplied region data, not code.
+data/reference/*
+!data/reference/.gitkeep
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Working notes ─────────────────────────────────────────────────────────────
+# Notes and hand-offs, kept local and moved between machines by hand.
+docs/
+
+# ── Claude Code internal settings ─────────────────────────────────────────────
+.claude/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

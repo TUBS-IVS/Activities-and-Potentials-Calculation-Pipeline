@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+type: software
+title: "Activities and Potentials Calculation Pipeline"
+abstract: >
+  An open-source pipeline that derives building-level activity types and potentials
+  for agent-based travel demand models. It combines ALKIS / LoD2 cadastral buildings
+  and OpenStreetMap, classifies every building's activities (MiD labels) and
+  Bosserhof workplace class with a large language model or, alternatively, a
+  deterministic rule engine, and redistributes zone-level activity totals to the
+  buildings and their occupants by occupied floor area.
+authors:
+  - family-names: Patel
+    given-names: Mayur
+    email: m.patel@tu-braunschweig.de
+    affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
+repository-code: "https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline"
+license: MIT
+version: "2.0.0"
+date-released: "2026-10-20"
+keywords:
+  - building activity classification
+  - activity potential estimation
+  - large language models
+  - rule-based classification
+  - OpenStreetMap
+  - ALKIS
+  - agent-based modelling
+  - travel demand modelling
+  - disaggregation
