@@ -1,7 +1,7 @@
 # Rule-based classifier
 
 An alternative to the LLM classification of steps 05–06: a deterministic rule engine that gives every building of
-step 04 a set of MiD activity labels and one Bosserhof class, from structured tags alone — no language model, no API
+step 04 a set of MiD activity labels and one Bosserhoff class, from structured tags alone — no language model, no API
 call, no business-name matching. [`rule_utils.py`](rule_utils.py) is the whole classifier: no model weights, no
 inference. **Every answer comes from an explicit lookup table: one row per tag value, and the row *is* the rule.**
 
@@ -19,7 +19,7 @@ python rules/rule_smoke_test.py --amenity restaurant
 ```
 
 `rules_classification.parquet` has one row per building: `building_id`; `cls_sites`, `labels_sites`, `layer_sites`
-(Bosserhof class, `;`-separated MiD labels, the deciding layer — the main result); and `cls_own`, `labels_own`,
+(Bosserhoff class, `;`-separated MiD labels, the deciding layer — the main result); and `cls_own`, `labels_own`,
 `layer_own`, the same with only the POIs on the building, without the site polygons it lies in (a sensitivity check).
 To read step 04's outputs from another folder, set `RULES_INPUT_DIR`.
 
@@ -28,7 +28,7 @@ To read step 04's outputs from another folder, set `RULES_INPUT_DIR`.
 - [Three layers, strict precedence](#three-layers-strict-precedence)
 - [Design decisions](#design-decisions)
 - [Activity labels](#activity-labels)
-- [Bosserhof classes](#bosserhof-classes)
+- [Bosserhoff classes](#bosserhoff-classes)
 - [Where the rules live](#where-the-rules-live)
 - [Checking what the rules predict](#checking-what-the-rules-predict)
 - [Tests](#tests)
@@ -49,7 +49,7 @@ To read step 04's outputs from another folder, set `RULES_INPUT_DIR`.
 | `osm_landuse_class` | str | the OSM land use of the parcel, e.g. `industrial`, `retail` |
 
 POI values are lists, not `;`-joined strings, and a missing value is `None`, never `NaN` or the text `"nan"`.
-[`notebooks/classify_buildings.ipynb`](classify_buildings.ipynb) shows how such rows are built from the
+[`classify_buildings.ipynb`](classify_buildings.ipynb) shows how such rows are built from the
 preprocessed buildings and POIs, and checks every row before classifying it.
 
 ## Output
@@ -60,7 +60,7 @@ preprocessed buildings and POIs, and checks every row before classifying it.
 ```
 
 `mid_labels` is a sorted list of [MiD activity labels](#activity-labels) (empty: no activity), `bosserhof_class` one of
-the [Bosserhof classes](#bosserhof-classes) or `None`, and `interpreted_type` the layer that decided.
+the [Bosserhoff classes](#bosserhoff-classes) or `None`, and `interpreted_type` the layer that decided.
 
 ---
 
@@ -82,7 +82,7 @@ The table format is the same everywhere:
 | — *no usable signal* | | | 125 · 0.3 % |
 
 *Measured on the 39,786 buildings of the Braunschweig preprocessing (main run: own POIs and site polygons). 38,299 of
-them (96.3 %) receive a Bosserhof class; the rest carry an ALKIS code that denotes no activity (garages, sheds, homes)
+them (96.3 %) receive a Bosserhoff class; the rest carry an ALKIS code that denotes no activity (garages, sheds, homes)
 or no signal at all.*
 
 ## Design decisions
@@ -105,15 +105,17 @@ or no signal at all.*
   rows, including explicit "no activity" rows, come first. `amenity`, `tourism`, `building` and `leisure` have no
   default: their values are too diverse. The rows were written from every value that occurs on a placed POI in the
   Braunschweig region.
-- **Strict precedence.** An answer from any layer — *including an explicit "no activity"* — ends classification.
+- **Strict precedence.** An answer from a layer ends classification. An ALKIS row marked "no activity" is such an
+  answer; a POI-tag row marked "no activity" (`(set(), None)`) is not, and the building falls through to the next
+  layer as if it had no tag.
   Unioning layers instead was rejected: `services` (2.31) would attach to nearly every POI building and, under the
   highest-weight rule, silently override real classes just below it, turning every `kindergartens` (2.30) into
   `services`.
 - **Keyed on the ALKIS code, never the English label.** `31001_3031` is *Schloss* (a palace) but ships with the label
   "Lock", and 15 of 301 codes share a label with another code. No rule reads translated text.
-- **`work` is added centrally, not per row.** A Bosserhof class *is* a worker-density rating, so anything carrying one
+- **`work` is added centrally, not per row.** A Bosserhoff class *is* a worker-density rating, so anything carrying one
   is by definition staffed. The tables describe only the visitor-facing purpose; `classify_building` adds `work` once.
-- **Multi-tenant buildings.** Labels are unioned across all POIs on the building. The Bosserhof class must be single
+- **Multi-tenant buildings.** Labels are unioned across all POIs on the building. The Bosserhoff class must be single
   (a capacity formula takes one coefficient), so the highest worker-weight match wins — an explicit rule standing in
   for judgement the pipeline cannot make, and a known source of upward bias.
 - **No names.** No rule reads a business name. Recognising that "Bahlsen" is a food manufacturer requires world
@@ -123,7 +125,7 @@ or no signal at all.*
   `greenhouse|agricultural` would capture ≈3,800 farm *dwellings*, `church|chapel` a church *tower*. One explicit row
   per code removes the failure mode: there is no ordering to get wrong.
 
-Every table is statically validated at import (`validate_rule_tables()`): an invalid Bosserhof class or MiD label
+Every table is statically validated at import (`validate_rule_tables()`): an invalid Bosserhoff class or MiD label
 anywhere fails immediately.
 
 ---
@@ -147,10 +149,10 @@ A distinction *within* a group is descriptive only — whether a gym is `sports`
 group-level use. A distinction *across* groups does: whether a restaurant is `leisure` or `errands`. Both retail groups
 are fed only by real shop tags; generic ALKIS "trade and services" codes deliberately claim no retail.
 
-## Bosserhof classes
+## Bosserhoff classes
 
-Each building gets at most one **Bosserhof class** (e.g. `normal office`, `discount stores`, `schools`), which carries
-a worker density in workers per 100 m³ of building volume (`BOSSERHOF_WEIGHTS` in [`config.py`](config.py), 47
+Each building gets at most one **Bosserhoff class** (e.g. `normal office`, `discount stores`, `schools`), which carries
+a worker density in workers per 100 m² of floor area (`BOSSERHOF_WEIGHTS` in [`config.py`](config.py), 47
 classes). Six of them no rule emits: `craft courtyards`, `crafts and trades`, `factory outlet centers`,
 `retail wholesale`, `self service department stores`, `suppliers for car dealerships`
 (`reachable_bosserhof_classes()` lists the rest).
