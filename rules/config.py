@@ -30,7 +30,8 @@ TARGET_MID_LABELS = {
     "sports", "errands", "meetup", "lessons", "business",
 }
 
-# MiD labels -> the 7 zone activity columns used for redistribution
+# MiD labels -> 7 activity groups. Neither the classifier nor the pipeline reads this mapping; step 08 uses the
+# mapping of the same name in the root config.py, which feeds each zone category from exactly one label.
 MID_LABEL_TO_ACTIVITY = {
     "work":           "Workers",
     "business":       "Workers",

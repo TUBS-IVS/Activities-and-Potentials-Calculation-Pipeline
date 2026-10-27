@@ -31,13 +31,20 @@ reasoning.
 - **Floor area** = footprint × storeys. The **occupied floor area** O is the part of it the building's uses take, by
   rules per class and POI family (`lib/floor_rules.py`): for example, a shop under flats takes the ground floor, and
   free floors with dwellings carry nothing. Free floors without dwellings form a remainder unit that carries Workers
-  only, at the office factor (`REDIST_REMAINDER_WORKERS_FACTOR`).
+  only: at the normal-office factor (`REDIST_REMAINDER_WORKERS_FACTOR`) in shop and office buildings
+  (`REDIST_REMAINDER_OFFICE_CLASSES`), and at the building's own factor in any other building.
 - **Units.** A building without POIs of its own that step 07 classified is one unit. In a building shared by several
-  POIs, each POI is a unit. Its share of the building comes from step 04 (`share_in_building`): the POI's polygon
-  area × its height (OSM `height`, else `building:levels` × 3.0 m, else the building's mean height), so a tall tower
-  on a low base takes more than its footprint; a point POI takes at least the median polygon area of its group,
-  within caps (`UNIT_SIZE_RULES`), and without polygons the building is split evenly. A label of
-  the building that none of its POIs carries stays on a rest unit on the floor the POIs leave free.
+  POIs, each POI is a unit. Its starting share of the building comes from step 04 (`share_in_building`): the POI's
+  split area × its split height, over the sum for all POIs on the building. The split area is a polygon POI's own
+  area; a point POI takes the median area of the polygon POIs on the same building, and where the building has none,
+  every POI counts `POI_SPLIT_AREA_FALLBACK_M2`, an even split of the area. A unit inside a mall or another POI takes
+  the area step 01 gave it by the same rule among the units of its parent. The split height is the OSM `height`,
+  else `building:levels` × 3.0 m (`POI_SPLIT_STOREY_HEIGHT_M`), else the building's mean height, so a tall tower on a
+  low base takes more than its footprint. Step 08 then sizes the units: a point POI counts at least the median
+  polygon of its POI group (`UNIT_SIZE_RULES`) and, unless it is an anchor (`POI_ANCHOR_GROUPS`), at most its
+  group's cap, mostly the 90th percentile of the group's mapped polygons (`POINT_SIZE_CAP_M2`), with further rules
+  for mall tenants, pharmacies, chains and formats (`UNIT_SIZE_RULES`, `UNIT_SIZE_FORMATS`, `lib/unit_sizes.py`). A
+  label of the building that none of its POIs carries stays on a rest unit on the floor the POIs leave free.
 - **Corrections from OSM evidence** remove or relabel units: vacant places (`REDIST_EXCLUDE_VACANT`,
   `VACANCY_OSM_SIGNS`), labels of steps 06 and 07 reconciled by the OSM use (`LABEL_RULES`), staff canteens and staff
   shops (`STAFF_CATERING_RULES`), and which buildings carry School, University and Kindergarten
@@ -128,6 +135,8 @@ the seven constrained categories.
 - **`zones`** (880): each zone's total (`target_<category>`) and the sum placed on its buildings
   (`assigned_<category>`).
 
+Column names write `_` for the `-` of Retail_Non-Daily: `assigned_Retail_Non_Daily`, `target_Retail_Non_Daily`.
+
 ## 5. Without the zone data
 
 Step 08 cannot run without `zone_targets.gpkg`; it stops at its input check and writes nothing. Which quantities
@@ -147,7 +156,17 @@ changes to the code, and its values would differ from the zone-constrained resul
 
 ## Volume
 
-The method weights by floor area, not by building volume. Volume appears in the pipeline only as an intermediate:
-step 03 computes it from the LoD2 surfaces (and step 04 estimates it for OSM footprints from their height tags),
-and step 08 divides it by the footprint to get the mean height that caps the storeys. Some step-03 and step-04
-statistics are reported in m³; they are not weights.
+The method weights by floor area, not by building volume; volume is never a weight of the allocation. Step 03
+computes it from the LoD2 surfaces, and step 04 estimates it for OSM footprints from their height tags. It is used
+in two ways:
+
+- **Mean height** = volume / footprint. In step 08 it caps the eaves height from which the storeys are counted,
+  stands in where there is no eaves height (`lib/floor_rules.py`, `lib/storey_evidence.py`) and marks the OSM
+  footprints that carry only step 04's placeholder height (`lib/gap_storeys.py`); in step 04 it is the last rung of
+  the split height of `share_in_building` (section 1, Units).
+- **`share_of_site`** (step 04): a building's volume over the total volume of the buildings on a site polygon such
+  as a campus (an even split where none of them has a volume). It only orders the sites in the LLM's record
+  (`lib/llm_record.py`) and in the lists the rule classifier reads (`rules/classify_buildings.ipynb`); step 08 does
+  not use it.
+
+Some step-03 and step-04 statistics are reported in m³; they are not weights.

@@ -4,9 +4,9 @@ test_rule_utils.py — Tests for the deterministic rule-based classifier.
 Two kinds of test here:
 
   * Real-sample tests, driven by `tests/data/sample_condensed_buildings.parquet`
-    — 24 rows of real classifier input, sampled across 8 signal buckets
+    — 30 rows of real classifier input, 3 from each of 10 signal buckets
     (school, kindergarten, restaurant, supermarket, hospital, office,
-    named_only, sparse) from the condensed buildings of the original
+    generic_commercial, dwelling, named_only, sparse) from the condensed buildings of the original
     pipeline the rules were written against.
 
   * Table tests, which call `classify_building` with a hand-built row. These

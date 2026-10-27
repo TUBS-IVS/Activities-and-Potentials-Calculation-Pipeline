@@ -1,7 +1,9 @@
 # Input data
 
-Apart from the two reference tables of step 04, no data is distributed with this repository. The pipeline expects
-the inputs in `data/input/`
+Apart from the two reference tables of step 04 and two small files of the rule classifier (an older copy of the
+codelist and a 30-building test sample; see
+[Data included for the rule classifier](#data-included-for-the-rule-classifier)), no data is distributed with this
+repository. The pipeline expects the inputs in `data/input/`
 (`config.INPUT_DIR`; set the environment variable `CAPACITY_INPUT_DIR` to use another folder) and the two reference
 tables in `data/reference/` (`config.REFERENCE_DIR`). The versions below are the ones used for the paper; newer
 releases exist and give different numbers.
@@ -38,8 +40,10 @@ releases exist and give different numbers.
   description at
   <https://lgln-geodaten.niedersachsen.de/startseite/luftbilder_und_3d_produkte/3d_produkte/3d_gebaudemodelle/3d-gebaudemodelle-lod1-und-lod2-142891.html>.
 - **Role:** step 02 merges the tiles into 4,891,343 surfaces; step 03 turns them into footprints with heights and
-  a volume, which serves only to derive the mean height (869,316 ALKIS buildings). The LoD2 tiles carry the ALKIS building id, function code and name, which is
-  why the buildings are called ALKIS buildings throughout.
+  a volume (869,316 ALKIS buildings). The volume is never a weight of the allocation: it gives the mean height
+  (volume / footprint) and step 04's `share_of_site` (see [REDISTRIBUTION.md](REDISTRIBUTION.md#volume)). The LoD2
+  tiles carry the ALKIS building id, function code and name, which is why the buildings are called ALKIS buildings
+  throughout.
 - **Licence:** open geodata of the LGLN, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Source note
   required by the LGLN terms (AGNB §7.2,
   <https://www.lgln.niedersachsen.de/AGNB/allgemeine-geschafts-und-nutzungsbedingungen-agnb-97401.html>):
@@ -72,10 +76,24 @@ step 04 stops with a "missing input" error. Both are included in [`data/referenc
 - **`building_function_codelist_de_en.csv`** — columns `function`, `label_de`, `label_en`; 301 codes. The German
   labels are those of the AdV codelist *AX_Gebaeudefunktion*, published in the GDI-DE registry
   (<https://registry.gdi-de.org/codelist/de.adv-online.gid/AX_Gebaeudefunktion>); the English labels are a
-  translation. [`rules/reference/building_function_codelist.csv`](rules/reference/building_function_codelist.csv) is
-  an older copy with the same columns, used by the rule classifier's smoke test for display only.
+  translation.
 - **`alkis_building_activity_map.csv`** — columns `gfk_class`, `gfk_name`, `gfk_code`, `activities`; 280 codes, each
   with the activities a building of that code may serve (`;`-separated). Prepared by the authors.
+
+## Data included for the rule classifier
+
+- **[`rules/reference/building_function_codelist.csv`](rules/reference/building_function_codelist.csv)** — an older
+  copy of `building_function_codelist_de_en.csv` with the same columns and codes. Three English labels differ:
+  `31001_3031` (Schloss) is "Lock" there and "Castle" in the pipeline's table, and `31001_2213` and `53009_2090`
+  (Schöpfwerk) are "Creation" there and "Drainage pumping station" in the pipeline's table. Only the rule
+  classifier's smoke test (`rules/rule_smoke_test.py`) reads it, to display the German labels; no rule reads it.
+- **[`rules/tests/data/sample_condensed_buildings.parquet`](rules/tests/data/sample_condensed_buildings.parquet)** —
+  30 buildings of the region, sampled from the condensed building table of the original pipeline the rules were
+  written against, as input rows for `rules/tests/test_rule_utils.py`. Its 21 columns hold LGLN data (ALKIS building
+  id, function code, volume, address, ALKIS land use), OSM data (names, tags, land use, and the `email` and
+  `website` contact tags of businesses), the labels of the two reference tables and the sampling group. It is
+  derived from OpenStreetMap (© OpenStreetMap contributors, ODbL 1.0) and LGLN data (© GeoBasis-DE/LGLN, Daten
+  geändert, CC BY 4.0) and keeps their terms; the MIT licence of the code does not cover it.
 
 ## Zone totals (step 08)
 
@@ -83,10 +101,25 @@ step 04 stops with a "missing input" error. Both are included in [`data/referenc
   with the structure data of the region's VISUM travel demand model, zone id `NO` (`ZONE_ID_COL`).
 - **Columns used** (`ZONE_COLUMN_MAP`): Workers `SG_3_BE~17`; School `SG_4_BS + SG_4_GSCH + SG_4_WFSCH` (vocational,
   primary and secondary pupils); University `SG_4_HS`; Kindergarten `SG_4_KITA`; Retail_Daily `SG_5_EK_TB`;
-  Retail_Non-Daily `SG_5_EK~19`; Leisure `SG_6_FR~23`. Step 08 also reads the zone name `NAME`, the district
-  `RO_LANDK~1` (`ZONE_DISTRICT_COL`) and three Workers sector columns (`WORKER_SECTOR_COLUMNS`). These names fit this
-  layer only; for another zone model, change `ZONE_LAYER`, `ZONE_ID_COL`, `ZONE_COLUMN_MAP`, `ZONE_DISTRICT_COL` and
-  `WORKER_SECTOR_COLUMNS`.
+  Retail_Non-Daily `SG_5_EK~19`; Leisure `SG_6_FR~23`. Missing values count as 0. Step 08 also reads the zone name
+  `NAME` (for its printouts and the `zones` layer of the output), the district `RO_LANDK~1` (`ZONE_DISTRICT_COL`) and
+  three Workers sector columns (`WORKER_SECTOR_COLUMNS`); the district and the sectors serve a check and a diagnostic
+  only, not the allocation.
+- **Another zone model:** these names fit this layer only. Set in `config.py`:
+  - `ZONE_TARGETS_FILE` and `ZONE_LAYER`: the file and its layer of zone polygons;
+  - `ZONE_ID_COL`: a unique, whole-number zone id;
+  - `ZONE_COLUMN_MAP`: the column, or list of columns summed, for each of the seven categories;
+  - `SCHOOL_TYPE_COLUMNS`: exactly the School columns of `ZONE_COLUMN_MAP`, one per school type; the types are
+    `primary`, `secondary` and `vocational` (names the code matches in `lib/floor_rules.py`), and where a model lacks
+    one, `SCHOOL_TYPE_DEFAULT` and `SCHOOL_TYPE_ALKIS` may name only the types kept;
+  - `WORKER_SECTOR_COLUMNS`: the Workers sector columns, which must add up to the Workers total in every zone
+    (`WORKER_SECTOR_CLASSES` assigns the building classes to the sectors), and `ZONE_DISTRICT_COL`: the district of
+    each zone;
+  - `FLOOR_OSM_HALL_LEVELS`: its `zones` entry is the zone id of the Volkswagen plant in this model.
+
+  The layer must also have a column `NAME` (a fixed name in notebook 08) and be in EPSG:25832 (`TARGET_CRS`). Step 08
+  stops at its input check if a column is missing, the ids are not unique, the CRS differs, a total is negative, or
+  the school types or the Workers sectors do not add up to their totals.
 - **Source and access:** supplied by the Regionalverband Großraum Braunschweig
   (<https://www.regionalverband-braunschweig.de/>). Not public and not redistributable without their permission.
 - **Role:** step 08 reads it on every run; without it step 08 stops at its input check and writes nothing.
@@ -96,5 +129,11 @@ step 04 stops with a "missing input" error. Both are included in [`data/referenc
 ## Derived data
 
 The step outputs in `data/output/` are not distributed. Those of steps 01–07 and `rules/` derive from the open
-inputs (ODbL, CC BY 4.0) and the LLM. All outputs of step 08 derive from the restricted zone totals: summing
-`assigned_<category>` by zone gives the zone totals back, so they fall under the same restriction.
+inputs (ODbL, CC BY 4.0) and the LLM. All outputs of step 08 derive from the restricted zone totals, so they fall
+under the same restriction. The `zones` layer holds the totals themselves (`target_<category>`), and the building
+values reveal many of them: summing `assigned_<category>` by zone comes within 1 % of the zone's total in 42 %
+(Workers), 63 % (School), 20 % (University), 45 % (Kindergarten), 83 % (Retail_Daily), 75 % (Retail_Non-Daily) and
+62 % (Leisure) of the zones with a total; the rest differ where the rules move amounts between zones
+([REDISTRIBUTION.md](REDISTRIBUTION.md), section 2). The regional totals are kept exactly, and a building that is the
+only carrier in its zone can show that zone's total directly. Column names write `_` for the `-` of Retail_Non-Daily
+(`assigned_Retail_Non_Daily`, `target_Retail_Non_Daily`).

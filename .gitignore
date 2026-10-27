@@ -8,8 +8,9 @@ data/input/*
 data/output/*
 !data/output/.gitkeep
 
-# Throwaway layers made to be looked at in QGIS and then rewritten. Regenerated
-# by notebook 03, hundreds of MB, never an input to anything.
+# Throwaway layers made to be looked at in QGIS and then rewritten. Written by
+# notebooks 01 and 04 and the scripts/08_qgis_* scripts, hundreds of MB, never
+# an input to anything.
 data/experimental_extract/*
 !data/experimental_extract/.gitkeep
 

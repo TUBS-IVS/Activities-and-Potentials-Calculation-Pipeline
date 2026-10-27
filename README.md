@@ -38,14 +38,18 @@ calibration. In this implementation step 07 asks the LLM for the POIs' activity 
 building-use class is set by rule in step 08 from its OSM use (else the building's class applies). The region
 calibration is part of the configuration and always applied ([`REDISTRIBUTION.md`](REDISTRIBUTION.md)).*
 
-Run the notebooks in this order; each reads only the outputs of earlier steps.
+Run the notebooks in this order; each reads only the outputs of earlier steps. The full LLM runs are scripts:
+`scripts/05_run_llm.py` after notebook 05, and `scripts/07_run_llm_pois.py` between sections 5 and 6 of notebook 07.
+The rules notebook can run any time after step 04. The manual steps are obtaining the inputs ([`DATA.md`](DATA.md)),
+setting the LLM token and starting the two scripts; [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md#regenerating-the-outputs)
+gives the full procedure, including a headless run.
 
 | Step | Notebook | Paper stage | What it does | Main output (`data/output/`) |
 |---|---|---|---|---|
 | 01 | [`01_osm_extraction`](pipeline/01_osm_extraction.ipynb) | 4.2 | Clips the OSM extract to the study area; extracts activity-related POIs (27,843), building footprints and land use | `01_all_pois.gpkg`, `01_all_buildings_osm.gpkg`, `01_landuse_osm.gpkg` |
 | 02 | [`02_alkis_extraction`](pipeline/02_alkis_extraction.ipynb) | 4.1 | Selects, downloads and merges the region's LoD2 tiles | `02_alkis_lod2_raw.gpkg` |
 | 03 | [`03_alkis_refinement`](pipeline/03_alkis_refinement.ipynb) | 4.1 | Classifies LoD2 surfaces into ground, wall and roof; derives footprints, eaves and ridge heights per building (869,316) | `03_alkis_by_building.gpkg` |
-| 04 | [`04_semantic_enrichment`](pipeline/04_semantic_enrichment.ipynb) | 4.1, 4.2 | Adds OSM footprints missing from ALKIS (919,327), attaches functions, names and land use, places POIs on buildings, keeps the 39,786 buildings of activity | `04_buildings_enriched.gpkg` |
+| 04 | [`04_semantic_enrichment`](pipeline/04_semantic_enrichment.ipynb) | 4.1, 4.2 | Adds the 50,011 OSM footprints missing from ALKIS (919,327 buildings in all), attaches functions, names and land use, places POIs on buildings, keeps the 39,786 buildings of activity | `04_buildings_enriched.gpkg` |
 | 05 | [`05_llm_classification`](pipeline/05_llm_classification.ipynb) | 4.3 | Builds one text record per building and asks the LLM for its labels and class (full run: [`scripts/05_run_llm.py`](scripts/05_run_llm.py)) | `05_llm_answers.jsonl` |
 | 06 | [`06_llm_assembly`](pipeline/06_llm_assembly.ipynb) | 4.3 | Puts the answers on the buildings; adds `work` by rule | `06_buildings_classified.gpkg` |
 | 07 | [`07_poi_classification`](pipeline/07_poi_classification.ipynb) | 4.3 | Asks the LLM for the labels of each POI in a shared building (full run: [`scripts/07_run_llm_pois.py`](scripts/07_run_llm_pois.py)) | `07_building_pois_classified.gpkg` |
@@ -53,9 +57,11 @@ Run the notebooks in this order; each reads only the outputs of earlier steps.
 | rules | [`classify_buildings`](rules/classify_buildings.ipynb) | 4.3 | Benchmark classifier, after step 04 | `rules_classification.parquet` |
 
 Each notebook opens with its purpose, inputs, outputs, requirements and steps. Notebooks 01–07 and the rules
-notebook keep the saved outputs of the run behind the paper; notebook 08's outputs are removed because they derive
-from zone data that is not public. Every setting is in [`config.py`](config.py), with its reasoning in the comments;
-shared code is in [`lib/`](lib/). [`REDISTRIBUTION.md`](REDISTRIBUTION.md) explains step 08.
+notebook keep the saved outputs of the stored run, with local paths shown as `<repo>` and `<conda env>`; a few cells
+have none, among them sections 2–5 of notebook 07 ([`REPRODUCIBILITY.md`](REPRODUCIBILITY.md)). Notebook 08 has no
+saved outputs, because they derive from zone data that is not public. Every setting is in [`config.py`](config.py),
+with its reasoning in the comments; shared code is in [`lib/`](lib/). [`REDISTRIBUTION.md`](REDISTRIBUTION.md)
+explains step 08.
 
 ## Requirements
 
@@ -68,14 +74,19 @@ cd Activities-and-Potentials-Calculation-Pipeline
 conda create -n capacity python=3.13 && conda activate capacity
 conda install -c conda-forge osmium-tool gdal
 pip install -r requirements.txt
-pytest rules/tests                                   # 167 tests of the rule classifier, no data needed
+pytest rules/tests                                   # 167 tests of the rule classifier; data: rules/tests/data/
 ```
+
+Run the notebooks with this environment as the Jupyter kernel (`jupyterlab` is in `requirements.txt`).
 
 **Configuration.** All settings are in `config.py`. Inputs are read from `data/input/` (or the folder named by the
 environment variable `CAPACITY_INPUT_DIR`); outputs go to `data/output/`. Steps 05 and 07 call the KI-Toolbox of
 TU Braunschweig (`LLM_API_URL`, model `gpt-oss-120b` in `LLM_MODEL`), which is available to members of TU
-Braunschweig only; its token goes in a git-ignored `.env` file as `TU_KI_TOOLBOX_TOKEN=...`. To use another chat
-endpoint, change `LLM_API_URL` and `LLM_MODEL` and adapt the request in [`lib/llm_client.py`](lib/llm_client.py).
+Braunschweig only. Its token is read from the environment variable `TU_KI_TOOLBOX_TOKEN` or from a `.env` file in
+the repository root with the line `TU_KI_TOOLBOX_TOKEN=<your token>`; `.env` is git-ignored and must never be
+committed. To use another chat endpoint, change `LLM_API_URL` and `LLM_MODEL` and adapt the request in
+[`lib/llm_client.py`](lib/llm_client.py). The data folders `data/input/`, `data/output/` and
+`data/experimental_extract/` are git-ignored as well.
 
 **Input data.** [`DATA.md`](DATA.md) gives each input's version, source, terms and expected path.
 
@@ -107,16 +118,19 @@ match the zone-constrained results.
 
 `08_redistribution.gpkg` has three layers: `buildings` (39,786: class, labels, storeys, floor area, occupied floor
 area, `assigned_<category>` for the seven categories, `value_<label>` for the five estimates, `value_assumed`),
-`pois` (7,864 POI units of shared buildings, same values) and `zones` (each zone's total and the sum placed on its
-buildings). The step outputs are not distributed: the classification outputs derive from OSM (ODbL) and LGLN data
-(CC BY 4.0), and every step-08 output derives from the restricted zone totals, which can be recovered by summing
-`assigned_<category>` by zone.
+`pois` (7,864 POI units of shared buildings, same values) and `zones` (each zone's total `target_<category>` and the
+sum placed on its buildings `assigned_<category>`). Column names write `Retail_Non-Daily` as `Retail_Non_Daily`
+(`assigned_Retail_Non_Daily`). The outputs of the other steps are listed in the table above and in each notebook's
+header. The step outputs are not distributed: the classification outputs derive from OSM (ODbL) and LGLN data
+(CC BY 4.0), and every step-08 output derives from the restricted zone totals: summing `assigned_<category>` by
+zone returns many zones' totals almost exactly ([`DATA.md`](DATA.md#derived-data)).
 
 ## Limitations
 
 - The zone totals are restricted, so the activity potentials can be reproduced only with lawful access to them.
 - The LLM endpoint offers no temperature or seed control; re-running steps 05 and 07 can give different answers. The
-  answers behind the paper are not distributed.
+  answers behind the paper are not distributed. Without a token, the sample cells of notebooks 05 and 07 fail and the
+  full LLM runs cannot be made; steps 06–08 then need the answer files of an earlier run.
 - The open inputs are served in their current release; the versions above must be obtained to rebuild the same data.
 - Some settings hold published facts of the Braunschweig region (staff numbers of large institutions, retail floor
   areas of shopping centres, hand-checked building lists); they do not transfer to other regions
@@ -130,11 +144,16 @@ A transferable version of the pipeline for other regions is under development.
 
 This is **Version 1** (tag [`v1.0.0`](https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline/releases/tag/v1.0.0)).
 The paper's results were produced with the code at commit
-[`60469fa`](https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline/commit/60469fa22244bf4af3ed456a4d1fff4ae0eda34b);
-Version 1 differs from it only in documentation, comments, notebook text and saved outputs, and the added reference
-tables, not in any calculation. [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) lists runtimes, what can and cannot be
-reproduced, and what was checked. The paper validates the classification on a sample of buildings of the region;
-the validation data and code are not part of this repository.
+[`b751cd9`](https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline/commit/b751cd9a6c8a74886ae82bc00df5fe6b7402641c);
+the one exception is the text of the building records the LLM answered, which was written before a final change to
+step 04's `share_in_building` rule and lists the POIs in another order in 35 of 39,786 records (no output of step 06
+or later changes; [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md)). Version 1 differs from that commit only in
+documentation, code comments, a few descriptive strings in `config.py`, notebook text and saved outputs, the added
+reference tables of step 04, the figure, the licence and citation files and `.gitignore`; no calculation changed.
+[`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) gives the procedure to regenerate the outputs, runtimes, what can and
+cannot be reproduced, and what was checked, including a regeneration of steps 01–08 and the rules notebook from a
+fresh clone. The paper validates the classification on a sample of buildings of the region; the validation data and
+code are not part of this repository.
 
 ## Repository structure
 
@@ -153,7 +172,8 @@ the validation data and code are not part of this repository.
 │   └── experimental_extract/  ← QGIS review layers (not tracked)
 ├── DATA.md                ← input data: version, source, terms, expected path
 ├── REDISTRIBUTION.md      ← method note on step 08
-├── REPRODUCIBILITY.md     ← execution order, runtimes, what can be reproduced
+├── REPRODUCIBILITY.md     ← how to regenerate the outputs, runtimes, what can be reproduced, what was checked
+├── CITATION.cff, LICENSE
 └── requirements.txt
 ```
 
@@ -166,6 +186,10 @@ the input data, which keep their own terms:
 - LoD2 building models and ALKIS land use: © GeoBasis-DE/LGLN, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
   results derived from them carry the source note "© GeoBasis-DE/LGLN <year of download>, Daten geändert".
 - Zone totals: Regionalverband Großraum Braunschweig; not public, not redistributable without their permission.
+
+The test sample `rules/tests/data/sample_condensed_buildings.parquet` (30 buildings of the region) is derived from
+OpenStreetMap and LGLN data and is not covered by the MIT Licence: © OpenStreetMap contributors, ODbL;
+© GeoBasis-DE/LGLN, CC BY 4.0, Daten geändert ([`DATA.md`](DATA.md#data-included-for-the-rule-classifier)).
 
 ## Citation
 
