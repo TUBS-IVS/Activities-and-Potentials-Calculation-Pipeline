@@ -1,0 +1,281 @@
+﻿gfk_class,gfk_name,gfk_code,activities
+Gebäude,Wohngebäude,31001_1000,home;meetup
+Gebäude,Wohnhaus,31001_1010,home;meetup
+Gebäude,Wohnheim,31001_1020,home;meetup
+Gebäude,Kinderheim,31001_1021,daycare;home
+Gebäude,Seniorenheim,31001_1022,home;leisure;meetup
+Gebäude,Wohn- und Geschäftsgebäude,31001_1023,home;meetup;shopping;work;business
+Gebäude,"Studenten-, Schülerwohnheim",31001_1024,home;meetup
+Gebäude,Schullandheim,31001_1025,home;education;leisure
+Gebäude,Gemischt genutztes Gebäude mit Wohnen,31001_1100,home;meetup;shopping;errands;business
+Gebäude,Wohngebäude mit Gemeinbedarf,31001_1110,home;meetup;errands
+Gebäude,Wohngebäude mit Handel und Dienstleistungen,31001_1120,home;meetup;work;shopping;business;errands
+Gebäude,Wohn- und Verwaltungsgebäude,31001_1121,home;work;meetup;business;errands
+Gebäude,Wohn- und Bürogebäude,31001_1122,home;meetup;work;business
+Gebäude,Wohn- und Geschäftsgebäude,31001_1123,home;meetup;work;shopping;business
+Gebäude,Wohngebäude mit Gewerbe und Industrie,31001_1130,home;meetup;work;business
+Gebäude,Wohn- und Betriebsgebäude,31001_1131,home;meetup;work;business
+Gebäude,Land- und forstwirtschaftliches Wohngebäude,31001_1210,home
+Gebäude,Land- und forstwirtschaftliches Wohn- und Betriebsgebäude,31001_1220,home;work
+Gebäude,Bauernhaus,31001_1221,home;work
+Gebäude,Wohn- und Wirtschaftsgebäude,31001_1222,home;meetup;work
+Gebäude,Forsthaus,31001_1223,home;work
+Gebäude,Gebäude zur Freizeitgestaltung,31001_1310,leisure;meetup
+Gebäude,Ferienhaus,31001_1311,home;meetup;leisure
+Gebäude,Wochenendhaus,31001_1312,home;meetup;leisure
+Gebäude,Gartenhaus,31001_1313,home;leisure
+Gebäude,Gebäude für Wirtschaft oder Gewerbe,31001_2000,work;business
+Gebäude,Gebäude für Handel und Dienstleistungen,31001_2010,work;shopping;business;errands
+Gebäude,Bürogebäude,31001_2020,work;business
+Gebäude,Kreditinstitut,31001_2030,work;business;errands
+Gebäude,Versicherung,31001_2040,work;business;errands
+Gebäude,Geschäftsgebäude,31001_2050,shopping;business;work
+Gebäude,Kaufhaus,31001_2051,work;shopping;errands
+Gebäude,Einkaufszentrum,31001_2052,work;shopping;errands;meetup
+Gebäude,Markthalle,31001_2053,work;business;shopping;errands
+Gebäude,Laden,31001_2054,work;shopping;errands
+Gebäude,Kiosk,31001_2055,work;shopping;meetup
+Gebäude,Apotheke,31001_2056,work;business;errands
+Gebäude,Messehalle,31001_2060,business;work;education
+Gebäude,Gebäude für Beherbergung,31001_2070,home;work;leisure
+Gebäude,"Hotel, Motel, Pension",31001_2071,home;leisure;business;work
+Gebäude,Jugendherberge,31001_2072,home;leisure;education;early_education;work
+Gebäude,Hütte (mit Übernachtungsmöglichkeit),31001_2073,home;leisure
+Gebäude,Campingplatzgebäude,31001_2074,home;leisure;meetup
+Gebäude,Ver,31001_2080,
+Gebäude,"Gaststätte, Restaurant",31001_2081,leisure;meetup;business;work
+Gebäude,Hütte (ohne Übernachtungsmöglichkeit),31001_2082,leisure
+Gebäude,Kantine,31001_2083,errands;work;meetup
+Gebäude,Freizeit- und Vergnügungsstätte,31001_2090,leisure;sports;meetup
+Gebäude,Festsaal,31001_2091,leisure;work;business
+Gebäude,Kino,31001_2092,leisure;meetup
+Gebäude,"Kegel-, Bowlinghalle",31001_2093,leisure;sports;meetup
+Gebäude,Spielkasino,31001_2094,leisure
+Gebäude,Gebäude für Gewerbe und Industrie,31001_2100,work;business
+Gebäude,Produktionsgebäude,31001_2110,work
+Gebäude,Fabrik,31001_2111,work
+Gebäude,Betriebsgebäude,31001_2112,work;business
+Gebäude,Brauerei,31001_2113,work
+Gebäude,Brennerei,31001_2114,work
+Gebäude,Werkstatt,31001_2120,work;errands;business
+Gebäude,Sägewerk,31001_2121,work
+Gebäude,Tankstelle,31001_2130,errands;work
+Gebäude,"Waschstraße, Waschanlage, Waschhalle",31001_2131,errands;work
+Gebäude,Gebäude für Vorratshaltung,31001_2140,work
+Gebäude,Kühlhaus,31001_2141,work
+Gebäude,Speichergebäude,31001_2142,work
+Gebäude,"Lagerhalle, Lagerschuppen, Lagerhaus",31001_2143,work;business;errands
+Gebäude,Speditionsgebäude,31001_2150,work;business
+Gebäude,Gebäude für Forschungszwecke,31001_2160,work;education
+Gebäude,Gebäude für Grundstoffgewinnung,31001_2170,work;business
+Gebäude,Bergwerk,31001_2171,work
+Gebäude,Saline,31001_2172,work
+Gebäude,Gebäude für betriebliche Sozialeinrichtung,31001_2180,work;business;errands
+Gebäude,Sonstiges Gebäude für Gewerbe und Industrie,31001_2200,work;business;errands
+Gebäude,Mühle,31001_2210,work;business;shopping;errands
+Gebäude,Windmühle,31001_2211,work
+Gebäude,Wassermühle,31001_2212,work
+Gebäude,Schöpfwerk,31001_2213,work
+Gebäude,Wetterstation,31001_2220,work;education
+Gebäude,Gebäude für Handel und Dienstleistung mit Wohnen,31001_2310,home;shopping;business
+Gebäude,Gebäude für Gewerbe und Industrie mit Wohnen,31001_2320,home;meetup;work;business
+Gebäude,Betriebsgebäude zu Verkehrsanlagen (allgemein),31001_2400,work
+Gebäude,Betriebsgebäude für Straßenverkehr,31001_2410,work
+Gebäude,Straßenmeisterei,31001_2411,work
+Gebäude,Wartehalle,31001_2412,work;leisure
+Gebäude,Betriebsgebäude für Schienenverkehr,31001_2420,work
+Gebäude,Bahnwärterhaus,31001_2421,work
+Gebäude,"Lokschuppen, Wagenhalle",31001_2422,work
+Gebäude,"Stellwerk, Blockstelle",31001_2423,work
+Gebäude,Betriebsgebäude des Güterbahnhofs,31001_2424,work
+Gebäude,Betriebsgebäude für Flugverkehr,31001_2430,work
+Gebäude,Flugzeughalle,31001_2431,work;business
+Gebäude,Betriebsgebäude für Schiffsverkehr,31001_2440,work;business
+Gebäude,Werft (Halle),31001_2441,work
+Gebäude,Dock (Halle),31001_2442,work
+Gebäude,Betriebsgebäude zur Schleuse,31001_2443,work
+Gebäude,Bootshaus,31001_2444,leisure;meetup
+Gebäude,Betriebsgebäude zur Seilbahn,31001_2450,work
+Gebäude,Spannwerk zur Drahtseilbahn,31001_2451,work
+Gebäude,Gebäude zum Parken,31001_2460,work
+Gebäude,Parkhaus,31001_2461,work;shopping;errands
+Gebäude,Parkdeck,31001_2462,work;shopping;errands
+Gebäude,Garage,31001_2463,work;home
+Gebäude,Fahrzeughalle,31001_2464,work
+Gebäude,Gebäude zur Versorgung,31001_2500,work
+Gebäude,Gebäude zur Energieversorgung,31001_2501,work
+Gebäude,Gebäude zur Wasserversorgung,31001_2510,work
+Gebäude,Wasserwerk,31001_2511,work
+Gebäude,Pumpstation,31001_2512,work
+Gebäude,Wasserbehälter,31001_2513,work
+Gebäude,Gebäude zur Elektrizitätsversorgung,31001_2520,work
+Gebäude,Elektrizitätswerk,31001_2521,work
+Gebäude,Umspannwerk,31001_2522,work
+Gebäude,Umformer,31001_2523,work
+Gebäude,Reaktorgebäude,31001_2527,work
+Gebäude,Turbinenhaus,31001_2528,work
+Gebäude,Kesselhaus,31001_2529,work
+Gebäude,Gebäude für Fernmeldewesen,31001_2540,work
+Gebäude,Gebäude an unterirdischen Leitungen,31001_2560,work
+Gebäude,Gebäude zur Gasversorgung,31001_2570,work
+Gebäude,Gaswerk,31001_2571,work
+Gebäude,Heizwerk,31001_2580,work
+Gebäude,Gebäude zur Versorgungsanlage,31001_2590,work
+Gebäude,Pumpwerk (nicht für Wasserversorgung),31001_2591,work
+Gebäude,Gebäude zur Entsorgung,31001_2600,work
+Gebäude,Gebäude zur Abwasserbeseitigung,31001_2610,work
+Gebäude,Gebäude der Kläranlage,31001_2611,work
+Gebäude,Toilette,31001_2612,work;errands
+Gebäude,Gebäude zur Abfallbehandlung,31001_2620,work
+Gebäude,Müllbunker,31001_2621,work;errands
+Gebäude,Gebäude zur Müllverbrennung,31001_2622,work
+Gebäude,Gebäude der Abfalldeponie,31001_2623,work;errands;business
+Gebäude,Gebäude für Land- und Forstwirtschaft,31001_2700,work
+Gebäude,Land- und forstwirtschaftliches Betriebsgebäude,31001_2720,work
+Gebäude,Scheune,31001_2721,work
+Gebäude,Schuppen,31001_2723,work
+Gebäude,Stall,31001_2724,work
+Gebäude,Scheune und Stall,31001_2726,work
+Gebäude,Stall für Tiergroßhaltung,31001_2727,work
+Gebäude,Reithalle,31001_2728,sports;work;leisure
+Gebäude,Wirtschaftsgebäude,31001_2729,work;business
+Gebäude,Almhütte,31001_2732,leisure;home
+Gebäude,"Jagdhaus, Jagdhütte",31001_2735,leisure;work
+Gebäude,"Treibhaus, Gewächshaus",31001_2740,work
+Gebäude,Treibhaus,31001_2741,work
+Gebäude,"Gewächshaus, verschiebbar",31001_2742,work
+Gebäude,Gebäude für öffentliche Zwecke,31001_3000,work;leisure;business;meetup;errands
+Gebäude,Verwaltungsgebäude,31001_3010,work;errands;business
+Gebäude,Parlament,31001_3011,work;business
+Gebäude,Rathaus,31001_3012,work;errands;business
+Gebäude,Post,31001_3013,work;errands;business
+Gebäude,Zollamt,31001_3014,work;errands;business
+Gebäude,Gericht,31001_3015,work;errands;business
+Gebäude,"Botschaft, Konsulat",31001_3016,work;errands;business
+Gebäude,Kreisverwaltung,31001_3017,work;errands;business
+Gebäude,Bezirksregierung,31001_3018,work;errands;business
+Gebäude,Finanzamt,31001_3019,work;errands;business
+Gebäude,Gebäude für Bildung und Forschung,31001_3020,education;work
+Gebäude,Allgemein bildende Schule,31001_3021,education;work
+Gebäude,Berufsbildende Schule,31001_3022,education;work
+Gebäude,"Hochschulgebäude (Fachhochschule, Universität)",31001_3023,education;work
+Gebäude,Forschungsinstitut,31001_3024,education;work
+Gebäude,Gebäude für kulturelle Zwecke,31001_3030,leisure;meetup;education
+Gebäude,Schloss,31001_3031,leisure;work
+Gebäude,"Theater, Oper",31001_3032,leisure;meetup;work
+Gebäude,Konzertgebäude,31001_3033,leisure;meetup;work
+Gebäude,Museum,31001_3034,leisure;education;early_education;work
+Gebäude,"Rundfunk, Fernsehen",31001_3035,leisure;work
+Gebäude,Veranstaltungsgebäude,31001_3036,leisure;work;business
+Gebäude,"Bibliothek, Bücherei",31001_3037,leisure;education;early_education;work
+Gebäude,"Burg, Festung",31001_3038,leisure;work
+Gebäude,Gebäude für religiöse Zwecke,31001_3040,leisure;work
+Gebäude,Kirche,31001_3041,leisure;work
+Gebäude,Synagoge,31001_3042,leisure;work
+Gebäude,Kapelle,31001_3043,leisure;work
+Gebäude,Gemeindehaus,31001_3044,leisure;work;meetup
+Gebäude,Gotteshaus,31001_3045,leisure;work
+Gebäude,Moschee,31001_3046,leisure;work
+Gebäude,Tempel,31001_3047,leisure;work
+Gebäude,Kloster,31001_3048,leisure;work
+Gebäude,Gebäude für Gesundheitswesen,31001_3050,errands;work
+Gebäude,Krankenhaus,31001_3051,errands;work;business
+Gebäude,"Heilanstalt, Pflegeanstalt, Pflegestation",31001_3052,errands;work;home
+Gebäude,"Ärztehaus, Poliklinik",31001_3053,errands;work;business
+Gebäude,Gebäude für soziale Zwecke,31001_3060,leisure;meetup;education;work
+Gebäude,Jugendfreizeitheim,31001_3061,leisure;meetup;sports;education;work
+Gebäude,"Freizeit-, Vereinsheim, Dorfgemeinschafts-, Bürgerhaus",31001_3062,leisure;meetup;sports
+Gebäude,Seniorenfreizeitstätte,31001_3063,leisure;meetup
+Gebäude,Obdachlosenheim,31001_3064,home;work
+Gebäude,"Kinderkrippe, Kindergarten, Kindertagesstätte",31001_3065,daycare;work
+Gebäude,Asylbewerberheim,31001_3066,home;work
+Gebäude,Gebäude für Sicherheit und Ordnung,31001_3070,work;business
+Gebäude,Polizei,31001_3071,work;business;errands
+Gebäude,Feuerwehr,31001_3072,work;business;education;leisure;meetup
+Gebäude,Kaserne,31001_3073,work
+Gebäude,Schutzbunker,31001_3074,other
+Gebäude,Justizvollzugsanstalt,31001_3075,work;home;business
+Gebäude,Friedhofsgebäude,31001_3080,other;work;errands
+Gebäude,Trauerhalle,31001_3081,other;work
+Gebäude,Krematorium,31001_3082,other;work
+Gebäude,Empfangsgebäude,31001_3090,work;business;errands
+Gebäude,Bahnhofsgebäude,31001_3091,work;business;leisure;meetup
+Gebäude,Flughafengebäude,31001_3092,work;business;leisure;meetup
+Gebäude,Gebäude zum U-Bahnhof,31001_3094,work;business;leisure;meetup
+Gebäude,Gebäude zum S-Bahnhof,31001_3095,work;business;leisure;meetup
+Gebäude,Gebäude zum Busbahnhof,31001_3097,work;business;leisure;meetup
+Gebäude,Empfangsgebäude Schifffahrt,31001_3098,work;business;leisure;meetup
+Gebäude,Gebäude für öffentliche Zwecke mit Wohnen,31001_3100,home;work;errands;education;business
+Gebäude,Gebäude für Erholungszwecke,31001_3200,leisure;work;lessons
+Gebäude,Gebäude für Sportzwecke,31001_3210,sports;work;leisure;lessons
+Gebäude,"Sport-, Turnhalle",31001_3211,sports;work;leisure
+Gebäude,Gebäude zum Sportplatz,31001_3212,sports;work;leisure
+Gebäude,Badegebäude,31001_3220,sports;work;leisure
+Gebäude,Hallenbad,31001_3221,sports;work;leisure;lessons
+Gebäude,Gebäude im Freibad,31001_3222,sports;work;leisure;meetup
+Gebäude,Gebäude im Stadion,31001_3230,sports;work;leisure;meetup
+Gebäude,Gebäude für Kurbetrieb,31001_3240,leisure;lessons;work;business
+Gebäude,Badegebäude für medizinische Zwecke,31001_3241,leisure;work;business;errands
+Gebäude,Sanatorium,31001_3242,leisure;work;business
+Gebäude,Gebäude im Zoo,31001_3260,leisure;work;education
+Gebäude,Empfangsgebäude des Zoos,31001_3261,leisure;work
+Gebäude,"Aquarium, Terrarium, Voliere",31001_3262,leisure;work;education
+Gebäude,Tierschauhaus,31001_3263,leisure;work
+Gebäude,Stall im Zoo,31001_3264,leisure;work
+Gebäude,Gebäude im botanischen Garten,31001_3270,leisure;work
+Gebäude,Empfangsgebäude des botanischen Gartens,31001_3271,leisure;work
+Gebäude,Gewächshaus (Botanik),31001_3272,leisure;work
+Gebäude,Pflanzenschauhaus,31001_3273,leisure;work
+Gebäude,Gebäude für andere Erholungseinrichtung,31001_3280,leisure;work;lessons
+Gebäude,Schutzhütte,31001_3281,leisure;sports
+Gebäude,Touristisches Informationszentrum,31001_3290,leisure;education;early_education;work
+Gebäude,Nach Quellenlage nicht zu spezifizieren,31001_9998,unspecified
+Turm,Wasserturm,51001_1001,work
+Turm,"Kirchturm, Glockenturm",51001_1002,leisure;work
+Turm,Aussichtsturm,51001_1003,leisure;work
+Turm,Kontrollturm,51001_1004,work
+Turm,Kühlturm,51001_1005,work
+Turm,Leuchtturm,51001_1006,work
+Turm,Feuerwachturm,51001_1007,work
+Turm,"Sende-, Funkturm, Fernmeldeturm",51001_1008,work
+Turm,"Stadt-, Torturm",51001_1009,leisure;work
+Turm,Förderturm,51001_1010,work
+Turm,Bohrturm,51001_1011,work
+Turm,"Schloss-, Burgturm",51001_1012,leisure
+Turm,Nach Quellenlage nicht zu spezifizieren,51001_9998,unspecified
+Turm,Sonstiges,51001_9999,unspecified
+Bauwerk oder Anlage für Industrie und Gewerbe,Biogasanlage,51002_1215,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Windrad,51002_1220,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Solarzellen,51002_1230,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Mast,51002_1250,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Funkmast,51002_1260,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Radioteleskop,51002_1280,work
+Bauwerk oder Anlage für Industrie und Gewerbe,"Schornstein, Schlot, Esse",51002_1290,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Kran,51002_1330,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Drehkran,51002_1331,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Portalkran,51002_1332,work
+Bauwerk oder Anlage für Industrie und Gewerbe,"Laufkran, Brückenlaufkran",51002_1333,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Hochofen,51002_1350,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Umformer,51002_1400,work
+Bauwerk oder Anlage für Industrie und Gewerbe,Sonstiges,51002_9999,unspecified
+"Vorratsbehalter, Speicherbauwerk",Silo,51003_1201,work
+"Vorratsbehalter, Speicherbauwerk",Tank,51003_1205,work
+"Vorratsbehalter, Speicherbauwerk",Gasometer,51003_1206,work
+"Vorratsbehalter, Speicherbauwerk",Sonstiges,51003_9999,unspecified
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung",Zuschauertribüne,51006_1430,sports;leisure;meetup
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung","Zuschauertribüne, überdacht",51006_1431,sports;leisure;meetup
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung","Zuschauertribüne, nicht überdacht",51006_1432,sports;leisure;meetup
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung",Stadion,51006_1440,sports;leisure;meetup;work
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung",Sprungschanze (Anlauf,51006_1470,sports;leisure;meetup;work
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung",Gradierwerk,51006_1490,leisure
+"Bauwerk oder Anlage für Sport, Freizeit, und Erholung",Sonstiges,51006_9999,unspecified
+Historiches Bauwerk oder historiche Einrichtung,"Wachtturm (römisch), Warte",51007_1210,leisure;business
+Historiches Bauwerk oder historiche Einrichtung,Befestigung (Burgruine),51007_1400,leisure;business
+Historiches Bauwerk oder historiche Einrichtung,Historische Mauer,51007_1500,leisure;business
+Historiches Bauwerk oder historiche Einrichtung,Stadtmauer,51007_1510,leisure;business
+Historiches Bauwerk oder historiche Einrichtung,Sonstige historische Mauer,51007_1520,leisure;business
+Historiches Bauwerk oder historiche Einrichtung,Sonstiges,51007_9999,unspecified
+Sonstiges Bauwerk oder sonstige Einrichtung,Überdachung,51009_1610,work;leisure
+Sonstiges Bauwerk oder sonstige Einrichtung,Carport,51009_1611,work;leisure
+Sonstiges Bauwerk oder sonstige Einrichtung,"Denkmal, Denkstein, Standbild",51009_1750,other;leisure;business
+Sonstiges Bauwerk oder sonstige Einrichtung,Sonstiges,51009_9999,unspecified

@@ -13,9 +13,12 @@ data/output/*
 data/experimental_extract/*
 !data/experimental_extract/.gitkeep
 
-# Reference tables are user-supplied region data, not code.
+# Reference tables: the two tables step 04 reads are tracked, anything else placed
+# here is not.
 data/reference/*
 !data/reference/.gitkeep
+!data/reference/building_function_codelist_de_en.csv
+!data/reference/alkis_building_activity_map.csv
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

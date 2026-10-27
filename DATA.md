@@ -1,6 +1,7 @@
 # Input data
 
-None of the data is distributed with this repository. The pipeline expects the inputs in `data/input/`
+Apart from the two reference tables of step 04, no data is distributed with this repository. The pipeline expects
+the inputs in `data/input/`
 (`config.INPUT_DIR`; set the environment variable `CAPACITY_INPUT_DIR` to use another folder) and the two reference
 tables in `data/reference/` (`config.REFERENCE_DIR`). The versions below are the ones used for the paper; newer
 releases exist and give different numbers.
@@ -11,9 +12,9 @@ releases exist and give different numbers.
 | LoD2 tile index and tiles | `LOD2_TILE_INDEX_FILE`, `LOD2_CACHE_DIR` | step 02 | open (CC BY 4.0) |
 | ALKIS land use | `ALKIS_LANDUSE_FILE` | step 04 | open (CC BY 4.0) |
 | Study-area polygon | `STUDY_BOUNDARY_FILE` | steps 01, 02 | any polygon of the study area |
-| Building-function codelist | `BUILDING_FUNCTION_CODELIST_FILE` | step 04 | not distributed (public source) |
-| ALKIS activity map | `ALKIS_ACTIVITY_MAP_FILE` | step 04 | not distributed (authors' table) |
-| Zone totals | `ZONE_TARGETS_FILE`, `ZONE_LAYER`, `ZONE_COLUMN_MAP` | step 08 | not public (local authority) |
+| Building-function codelist | `BUILDING_FUNCTION_CODELIST_FILE` | step 04 | included in `data/reference/` |
+| ALKIS activity map | `ALKIS_ACTIVITY_MAP_FILE` | step 04 | included in `data/reference/` |
+| Zone totals | `ZONE_TARGETS_FILE`, `ZONE_LAYER`, `ZONE_COLUMN_MAP` | step 08 | restricted (local authority), not included |
 
 ## OpenStreetMap
 
@@ -37,7 +38,7 @@ releases exist and give different numbers.
   description at
   <https://lgln-geodaten.niedersachsen.de/startseite/luftbilder_und_3d_produkte/3d_produkte/3d_gebaudemodelle/3d-gebaudemodelle-lod1-und-lod2-142891.html>.
 - **Role:** step 02 merges the tiles into 4,891,343 surfaces; step 03 turns them into footprints with heights and
-  volumes (869,316 ALKIS buildings). The LoD2 tiles carry the ALKIS building id, function code and name, which is
+  a volume, which serves only to derive the mean height (869,316 ALKIS buildings). The LoD2 tiles carry the ALKIS building id, function code and name, which is
   why the buildings are called ALKIS buildings throughout.
 - **Licence:** open geodata of the LGLN, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Source note
   required by the LGLN terms (AGNB §7.2,
@@ -63,8 +64,10 @@ releases exist and give different numbers.
 
 ## Reference tables (step 04)
 
-Both tables are git-ignored and not part of this repository, so step 04 stops with a "missing input" error on a fresh
-clone until they are placed in `data/reference/`. They join on the full ALKIS code, e.g. `31001_2000`.
+Step 04 needs two small lookup tables, keyed on the ALKIS building-function code (e.g. `31001_2000`): one gives each
+code its German and English name, the other the activities a building of that code may serve. Step 04 attaches both
+to every building; the names go into the LLM's record and the activity list is kept for comparison. Without them
+step 04 stops with a "missing input" error. Both are included in [`data/reference/`](data/reference/).
 
 - **`building_function_codelist_de_en.csv`** — columns `function`, `label_de`, `label_en`; 301 codes. The German
   labels are those of the AdV codelist *AX_Gebaeudefunktion*, published in the GDI-DE registry
@@ -86,9 +89,12 @@ clone until they are placed in `data/reference/`. They join on the full ALKIS co
   `WORKER_SECTOR_COLUMNS`.
 - **Source and access:** supplied by the Regionalverband Großraum Braunschweig
   (<https://www.regionalverband-braunschweig.de/>). Not public and not redistributable without their permission.
-- **Role:** step 08 reads it on every run; without it step 08 cannot run.
+- **Role:** step 08 reads it on every run; without it step 08 stops at its input check and writes nothing.
+- **Use with lawful access:** place the file at `data/input/zone_targets.gpkg` (`ZONE_TARGETS_FILE` in `config.py`); the
+  layer, id and column names above must match. Do not publish the file or values derived from it.
 
 ## Derived data
 
-The step outputs in `data/output/` are not distributed. They combine the open inputs (ODbL, CC BY 4.0) with the
-zone totals, which are not public.
+The step outputs in `data/output/` are not distributed. Those of steps 01–07 and `rules/` derive from the open
+inputs (ODbL, CC BY 4.0) and the LLM. All outputs of step 08 derive from the restricted zone totals: summing
+`assigned_<category>` by zone gives the zone totals back, so they fall under the same restriction.

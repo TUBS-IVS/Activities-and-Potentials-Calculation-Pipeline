@@ -22,8 +22,8 @@ authors:
     affiliation: "Institute of Transportation and Urban Engineering, TU Braunschweig"
 repository-code: "https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline"
 license: MIT
-version: "2.0.0"
-date-released: "2026-10-20"
+version: "1.0.0"
+date-released: "2026-10-27"
 keywords:
   - building activity classification
   - activity potential estimation

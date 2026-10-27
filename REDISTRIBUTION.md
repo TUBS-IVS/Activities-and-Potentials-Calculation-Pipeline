@@ -33,8 +33,10 @@ reasoning.
   free floors with dwellings carry nothing. Free floors without dwellings form a remainder unit that carries Workers
   only, at the office factor (`REDIST_REMAINDER_WORKERS_FACTOR`).
 - **Units.** A building without POIs of its own that step 07 classified is one unit. In a building shared by several
-  POIs, each POI is a unit; its size comes from its OSM polygon area, a point POI takes at least the median polygon
-  area of its group, within caps (`UNIT_SIZE_RULES`), and without polygons the building is split evenly. A label of
+  POIs, each POI is a unit. Its share of the building comes from step 04 (`share_in_building`): the POI's polygon
+  area × its height (OSM `height`, else `building:levels` × 3.0 m, else the building's mean height), so a tall tower
+  on a low base takes more than its footprint; a point POI takes at least the median polygon area of its group,
+  within caps (`UNIT_SIZE_RULES`), and without polygons the building is split evenly. A label of
   the building that none of its POIs carries stays on a rest unit on the floor the POIs leave free.
 - **Corrections from OSM evidence** remove or relabel units: vacant places (`REDIST_EXCLUDE_VACANT`,
   `VACANCY_OSM_SIGNS`), labels of steps 06 and 07 reconciled by the OSM use (`LABEL_RULES`), staff canteens and staff
@@ -62,7 +64,7 @@ School is shared by school type (primary, secondary, vocational; `SCHOOL_TYPE_CO
 schools of that type.
 
 A unit's value is weight / Σ weights of the zone × zone total, and a building's value is the sum of its units. The
-regional totals are kept exactly: in the stored run the buildings add up to the regional total of each of the seven
+regional totals are kept exactly: in the run behind the paper the buildings add up to the regional total of each of the seven
 categories, with nothing unassigned. A zone's placed sum can differ from its own total where the rules below move
 amounts between zones (ring fallback, sharing of zero and near-zero totals, Workers caps and the raise of named
 institutions); the `zones` layer of the output holds both.
@@ -125,3 +127,27 @@ the seven constrained categories.
 - **`pois`** (7,864): the POI units of shared buildings with the same value columns.
 - **`zones`** (880): each zone's total (`target_<category>`) and the sum placed on its buildings
   (`assigned_<category>`).
+
+## 5. Without the zone data
+
+Step 08 cannot run without `zone_targets.gpkg`; it stops at its input check and writes nothing. Which quantities
+depend on the zone data:
+
+| Quantity | Depends on |
+|---|---|
+| `assigned_<category>`, the `zones` layer | the zone totals |
+| storeys, `floor_area_m2` | no zone data, except the storeys of the Volkswagen plant halls (`FLOOR_OSM_HALL_LEVELS` names their zone) |
+| `occupied_m2`, the unit split | mostly no zone data; a guard that keeps the last carrier of a zone total restores some labels and their floor |
+| `value_<label>`, `value_assumed` | floor area × visitor rate, no zone totals; but a building outside every zone gets no value, a venue's meetup value is net of its assigned Leisure, and the guard above changes some splits |
+| the worker estimate O × f / 100 inside the headcount rule | no zone data; it is an intermediate, not an output |
+
+The floor-area and visitor-rate parts of the method therefore need no zone totals in principle, but in this version
+they are computed only inside step 08, together with the allocation. An open-data estimate of potentials would need
+changes to the code, and its values would differ from the zone-constrained results described here.
+
+## Volume
+
+The method weights by floor area, not by building volume. Volume appears in the pipeline only as an intermediate:
+step 03 computes it from the LoD2 surfaces (and step 04 estimates it for OSM footprints from their height tags),
+and step 08 divides it by the footprint to get the mean height that caps the storeys. Some step-03 and step-04
+statistics are reported in m³; they are not weights.

@@ -48,7 +48,8 @@ MID_LABEL_TO_ACTIVITY = {
 
 # ──────────────────────────────────────────────
 # BOSSERHOF WORKER WEIGHTS
-# Workers per 100 m³ of building volume for each Bosserhof class.
+# Workers per 100 m² of floor area for each Bosserhoff class (the rules use them only to
+# pick the class with the highest density on a multi-tenant building).
 # All keys must be lowercase (normalization is applied before lookup).
 # Every class must be listed: a missing one gives NaN and the building is silently dropped.
 # ──────────────────────────────────────────────

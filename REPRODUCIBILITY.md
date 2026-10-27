@@ -2,9 +2,14 @@
 
 ## Code version
 
-The results in the paper were produced with the code at commit
+This is Version 1 of the pipeline, tagged `v1.0.0`; cite the tag, which gives a fixed state of the code that later
+changes cannot alter. The results in the paper were produced with the code at commit
 [`60469fa22244bf4af3ed456a4d1fff4ae0eda34b`](https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline/commit/60469fa22244bf4af3ed456a4d1fff4ae0eda34b).
-Later commits that change only documentation do not change any result.
+`v1.0.0` differs from it only in documentation, code comments, notebook text and saved outputs, a few descriptive
+strings in `config.py`, and the added reference tables of step 04; no calculation changed.
+
+Notebooks 01–07 and `rules/classify_buildings.ipynb` keep the saved outputs of the run behind the paper. The saved
+outputs of notebook 08 were removed because they derive from the restricted zone totals.
 
 ## Environment
 
@@ -29,7 +34,7 @@ can change the bytes of a GeoPackage without changing its content, so compare ou
 | 05 | `pipeline/05_llm_classification.ipynb` (input, sample), then `scripts/05_run_llm.py` (full run) | LLM endpoint | 34,993 calls; about 9 s per call in the stored sample; the stored full run took about 8 days |
 | 06 | `pipeline/06_llm_assembly.ipynb` | — | seconds |
 | 07 | `pipeline/07_poi_classification.ipynb` (input, sample), then `scripts/07_run_llm_pois.py` (full run), then section 6 of the notebook | LLM endpoint | 7,864 calls; the stored run took about 11 h |
-| 08 | `pipeline/08_redistribution.ipynb` | — | about 2.3 min (stored cell times) |
+| 08 | `pipeline/08_redistribution.ipynb` | — (needs the restricted zone totals) | a few minutes |
 | rules | `rules/classify_buildings.ipynb` (after step 04) | — | seconds |
 
 Manual steps:
@@ -48,12 +53,12 @@ Manual steps:
 |---|---|---|
 | Rule classifier tests (`pytest rules/tests`) | yes | no data needed |
 | Steps 01–03 | yes, if the same data versions can be obtained | OSM, LoD2 and ALKIS land use are open, but their providers serve the current release: the OSM extract of the date used must be rebuilt, and the LoD2 tiles and the land-use cut used may have been replaced (see [`DATA.md`](DATA.md)) |
-| Step 04 | only with the two reference tables | they are not distributed |
+| Step 04 | yes, after steps 01–03 | the two reference tables are included |
 | Steps 05–07, exactly | no | the KI-Toolbox is internal to TU Braunschweig, and the endpoint offers no temperature or seed control, so new calls can give different answers; the stored answers are not distributed |
 | Steps 05–07, with another LLM | yes, after adapting `lib/llm_client.py` | results will differ from the paper |
 | Rule classifier on the data | yes, after step 04 | deterministic |
-| Step 08 | only with the zone totals | `zone_targets.gpkg` is not public |
-| The paper's numbers | no | they rest on the zone totals, the reference tables and the stored LLM answers |
+| Step 08 | only with lawful access to the zone totals | `zone_targets.gpkg` is restricted; without it step 08 stops at its input check. This version has no open-data mode for step 08 |
+| The paper's numbers | no | they rest on the zone totals and the stored LLM answers, which are not distributed |
 
 ## What was checked
 
