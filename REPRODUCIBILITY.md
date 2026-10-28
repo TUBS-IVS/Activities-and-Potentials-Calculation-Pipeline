@@ -11,10 +11,6 @@ before a final change to step 04's `share_in_building` rule; see [What was check
 notebook text and saved outputs, the added reference tables of step 04, the figure, the licence and citation files
 and `.gitignore`; no code cell and no calculation changed.
 
-The repository history was rewritten on 27 October 2026 to remove values derived from the restricted zone totals
-from code comments and saved notebook outputs; no calculation changed. Commit IDs from before that date, such as
-`60469fa` for the code behind the paper, are no longer valid.
-
 Notebooks 01–07 and `rules/classify_buildings.ipynb` keep the saved outputs of the stored run, with local paths
 replaced by `<repo>` and `<conda env>`, except for these cells: the setup cell and the cell that writes the
 building layer in notebook 03, the cell that reports the progress of the full run in notebook 05, and sections 2–5
