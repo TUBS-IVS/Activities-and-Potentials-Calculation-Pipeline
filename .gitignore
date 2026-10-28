@@ -40,9 +40,6 @@ env/
 # Notes and hand-offs, kept local and moved between machines by hand.
 docs/
 
-# ── Claude Code internal settings ─────────────────────────────────────────────
-.claude/
-
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
