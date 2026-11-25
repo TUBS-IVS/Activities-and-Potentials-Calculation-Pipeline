@@ -16,6 +16,8 @@ requests>=2.31
 
 # --- Notebooks and tests ---
 jupyterlab>=4.0
+ipykernel>=6.0        # registers the environment as a Jupyter kernel
+nbconvert>=7.0        # headless runs of the notebooks
 pytest>=7.4
 
 # System tools, not pip packages:

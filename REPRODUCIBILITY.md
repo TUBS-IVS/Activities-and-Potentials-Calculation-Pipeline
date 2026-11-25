@@ -7,7 +7,7 @@ changes cannot alter. The results in the paper were produced with the code at co
 [`b751cd9a6c8a74886ae82bc00df5fe6b7402641c`](https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline/commit/b751cd9a6c8a74886ae82bc00df5fe6b7402641c).
 The one exception is the text of the building records the LLM answered (`05_llm_input.parquet`), which was written
 before a final change to step 04's `share_in_building` rule; see [What was checked](#what-was-checked).
-`v1.0.0` differs from that commit only in documentation, code comments, a few descriptive strings in `config.py`,
+`v1.0.0` differs from that commit only in documentation, comments in `rules/config.py`, a test docstring,
 notebook text and saved outputs, the added reference tables of step 04, the figure, the licence and citation files
 and `.gitignore`; no code cell and no calculation changed.
 
@@ -66,7 +66,7 @@ Manual steps:
 
 ## Regenerating the outputs
 
-1. **Environment.** Create the environment of the [README](README.md#requirements): Python 3.13, the packages of
+1. **Environment.** Create the environment of the [README](README.md#quick-start): Python 3.13, the packages of
    `requirements.txt`, and `osmium-tool` and GDAL. Register the environment as a Jupyter kernel, for example
    `python -m ipykernel install --user --name capacity`, and run every notebook with it (headless:
    `--ExecutePreprocessor.kernel_name=capacity`).

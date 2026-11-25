@@ -199,8 +199,8 @@ class TestAlkisCodeTable:
         assert r["interpreted_type"] == "alkis_code"
 
     def test_schloss_is_culture_not_a_canal_lock(self):
-        """31001_3031 is 'Schloss' (a palace) but ships with the English label
-        "Lock". Excluding it as a waterway structure would be wrong — this is why
+        """31001_3031 is 'Schloss' (a palace) but an earlier codelist gave it the English
+        label "Lock". Excluding it as a waterway structure would be wrong — this is why
         the table is keyed on the code and not on the translated text."""
         r = classify(function="31001_3031")
         assert r["bosserhof_class"] == "entertainment culture"

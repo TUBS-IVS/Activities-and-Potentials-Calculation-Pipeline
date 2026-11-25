@@ -16,8 +16,9 @@ from pathlib import Path
 ROOT      = Path(__file__).parent          # rules/
 REPO_ROOT = ROOT.parent
 
-# ALKIS building-function codelist: code -> German / English label (rule_smoke_test.py)
-BUILDING_FUNCTION_CODELIST = ROOT / "reference" / "building_function_codelist.csv"
+# ALKIS building-function codelist: code -> German / English label (rule_smoke_test.py, display only);
+# the pipeline's table in data/reference/
+BUILDING_FUNCTION_CODELIST = REPO_ROOT / "data" / "reference" / "building_function_codelist_de_en.csv"
 
 # ──────────────────────────────────────────────
 # ACTIVITY LABEL TAXONOMY
@@ -52,7 +53,12 @@ MID_LABEL_TO_ACTIVITY = {
 # Workers per 100 m² of floor area for each Bosserhoff class (the rules use them only to
 # pick the class with the highest density on a multi-tenant building).
 # All keys must be lowercase (normalization is applied before lookup).
-# Every class must be listed: a missing one gives NaN and the building is silently dropped.
+# Every class must be listed: weight_of() gives a missing one -1.0, so it never wins a tie-break.
+# These are the values the benchmark in the paper was run with. Six differ from BOSSERHOF_WEIGHTS in the root
+# config.py, which corrects them against their sources (vehicle electrical repair 2.0 -> 2.5, retail small
+# scale 3.75 -> 3.5, nursing homes 0.62 -> 1.25, services 2.31 -> 2.36, retail 1.75 -> 1.725, public
+# facilities 1.2 -> 1.30). Here they only rank classes; with the root values 69 of 39,786 buildings get
+# another class and no activity label changes.
 # ──────────────────────────────────────────────
 
 BOSSERHOF_WEIGHTS = {
@@ -83,7 +89,7 @@ BOSSERHOF_WEIGHTS = {
     "self service department stores":   1.1,
     "department stores":                1.55,
     "factory outlet centers":           2.15,
-    "retail wholesale":                 2.1,    # missing → NaN → silent drop
+    "retail wholesale":                 2.1,
     "schools":                          1.0,
     "universities":                     0.75,
     "research institutes":              1.25,

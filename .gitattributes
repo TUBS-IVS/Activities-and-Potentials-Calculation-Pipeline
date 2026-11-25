@@ -1,4 +1,4 @@
-# Force LF line endings on Linux/Mac — prevents CRLF issues when developing on Windows
+# Store and check out text files with LF line endings on every platform
 * text=auto eol=lf
 
 # Binary files — never touch line endings

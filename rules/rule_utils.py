@@ -6,7 +6,7 @@ WHAT THIS DOES
     * mid_labels      — which MiD activities happen there (subset of the 12 in
                         config.TARGET_MID_LABELS)
     * bosserhof_class — one worker-density class (one of the 47 in
-                        config.BOSSERHOF_WEIGHTS), used by notebook 07
+                        config.BOSSERHOF_WEIGHTS)
 
   Every answer comes from an explicit lookup table below. There is one row per
   tag value, and the row IS the rule — no scoring, no regex ordering, no
@@ -38,7 +38,8 @@ THE THREE LAYERS (strict precedence — first layer that answers, wins)
 
 KEYED ON THE ALKIS CODE, NOT THE ENGLISH LABEL
   The code is the authoritative identifier. The shipped English text is not:
-  `31001_3031` is "Schloss" (a palace) but is translated "Lock", and 15 of 301
+  `31001_3031` is "Schloss" (a palace) but an earlier codelist translated it
+  "Lock", and 15 of 301
   codes share a label with another code. Notebook 05 therefore carries
   `function` through, and this module never rules on translated text.
 
@@ -982,7 +983,7 @@ ALKIS_RULES = {
     # ── Culture ─────────────────────────────────────────────────────────────
     "31001_3034": ({"leisure"}, "entertainment culture"),  # Museum                 159
     "31001_3031": ({"leisure"}, "entertainment culture"),  # Schloss (NOT "Lock")    10
-    #   The shipped English label for 3031 is "Lock", a mistranslation of
+    #   An earlier English label for 3031 was "Lock", a mistranslation of
     #   Schloss. It is a palace, normally operated as a museum or venue.
     "31001_3038": ({"leisure"}, "entertainment culture"),  # Burg, Festung             3
     "31001_2212": ({"leisure"}, "entertainment culture"),  # Wassermühle               5

@@ -215,7 +215,7 @@ def label_fixes(ctx, bld, pois):
     """Real schools get the school label (R1, R3), vocational schools labelled university become School (R2, R4).
     Returns {building_id: new labels}, {poi_id: new labels}, {building_id or poi_id: forced school types}, and the log."""
     R, rx = ctx.R, ctx.rx
-    alk_school, uses_u = set(R['school_alkis']), set(R['univ_uses'])
+    alk_school = set(R['school_alkis'])
     bl, pl, forced, log = {}, {}, {}, []
     zoned = bld['zone_idx'].notna() if 'zone_idx' in bld.columns else pd.Series(True, index=bld.index)
     for bid, labels, z in zip(bld['building_id'], bld['labels'], zoned):

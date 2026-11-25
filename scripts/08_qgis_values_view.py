@@ -8,7 +8,7 @@ QGIS never opens it through this project.
 
 Rebuild it, then 08_qgis_values_project.py, after every run of notebook 08.
 
-usage (capacity-final env):  python scripts/08_qgis_values_view.py [<repo_root>]
+usage (the pipeline's environment):  python scripts/08_qgis_values_view.py [<repo_root>]
        (env VIEW_OUT: write a test file elsewhere)
 """
 import os

@@ -78,8 +78,9 @@ the folder that holds them. [`DATA.md`](DATA.md) gives each input's version, sou
 | Reference tables of step 04 (ALKIS function codelist, activity map per code) | — | **included** in [`data/reference/`](data/reference/) |
 | Zone totals (`zone_targets.gpkg`, VISUM structure data, 880 zones), step 08 only | — | **restricted**: supplied by the Regionalverband Großraum Braunschweig; not part of this repository |
 
-**3. Set up the LLM.** Steps 05 and 07 call the KI-Toolbox of TU Braunschweig (`LLM_API_URL`, model
-`gpt-oss-120b` in `LLM_MODEL`), which is open to members of TU Braunschweig only. Put your token in the environment
+**3. Set up the LLM.** Steps 05 and 07 call the KI-Toolbox of TU Braunschweig (`LLM_API_URL`; requested
+model `gpt-oss-120b` in `LLM_MODEL`, the endpoint does not report which model answered), which is open to members
+of TU Braunschweig only. Put your token in the environment
 variable `TU_KI_TOOLBOX_TOKEN` or in a file `.env` in the repository root:
 
 ```
@@ -117,7 +118,7 @@ jupyter nbconvert --to notebook --execute pipeline/01_osm_extraction.ipynb \
 - **Keep the answer files.** `05_llm_answers.jsonl` and `07_llm_poi_answers.jsonl` store each answer with the hash of
   the prompt it was made with, and answers are read back only under that prompt; a changed prompt in `config.py`
   means new calls.
-- **Runtimes and disk.** Without the LLM runs, steps 01–08 and the rules notebook took about 80 minutes on a Windows
+- **Runtimes and disk.** Without the LLM runs, steps 01–08 and the rules notebook took about 83 minutes on a Windows
   laptop; step 02 writes about 5 GB. Times per step are in [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md#execution-order).
 - **Compare outputs by value.** Re-running a step can change the bytes of a GeoPackage without changing its content.
 - **Keep restricted results private.** Everything step 08 writes, and executed copies of notebook 08, contain values

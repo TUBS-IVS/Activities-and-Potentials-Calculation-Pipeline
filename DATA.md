@@ -82,11 +82,8 @@ step 04 stops with a "missing input" error. Both are included in [`data/referenc
 
 ## Data included for the rule classifier
 
-- **[`rules/reference/building_function_codelist.csv`](rules/reference/building_function_codelist.csv)** — an older
-  copy of `building_function_codelist_de_en.csv` with the same columns and codes. Three English labels differ:
-  `31001_3031` (Schloss) is "Lock" there and "Castle" in the pipeline's table, and `31001_2213` and `53009_2090`
-  (Schöpfwerk) are "Creation" there and "Drainage pumping station" in the pipeline's table. Only the rule
-  classifier's smoke test (`rules/rule_smoke_test.py`) reads it, to display the German labels; no rule reads it.
+- The smoke test of the rule classifier (`rules/rule_smoke_test.py`) reads the German labels from
+  `data/reference/building_function_codelist_de_en.csv` above, for display only; no rule reads it.
 - **[`rules/tests/data/sample_condensed_buildings.parquet`](rules/tests/data/sample_condensed_buildings.parquet)** —
   30 buildings of the region, sampled from the condensed building table of the original pipeline the rules were
   written against, as input rows for `rules/tests/test_rule_utils.py`. Its 21 columns hold LGLN data (ALKIS building

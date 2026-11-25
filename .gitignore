@@ -36,8 +36,7 @@ env/
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 
-# ── Working notes ─────────────────────────────────────────────────────────────
-# Notes and hand-offs, kept local and moved between machines by hand.
+# ── Local notes (not part of the repository) ──────────────────────────────────
 docs/
 
 # ── OS ────────────────────────────────────────────────────────────────────────

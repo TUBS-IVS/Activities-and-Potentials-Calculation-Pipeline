@@ -9,7 +9,7 @@ atlas with all classes for one zone at a time (each panel title gives the zone's
 Run 08_qgis_values_view.py first. QGIS must not have the project open.
 
 usage (QGIS's python, from PowerShell):
-    & "C:/Program Files/QGIS 4.2.3/bin/python-qgis.bat" scripts/08_qgis_values_project.py [<repo_root>]
+    & "<QGIS install folder>/bin/python-qgis.bat" scripts/08_qgis_values_project.py [<repo_root>]
        (env VIEW_DIR: build next to a test view file elsewhere)
 """
 import math

@@ -6,7 +6,7 @@ call, no business-name matching. [`rule_utils.py`](rule_utils.py) is the whole c
 inference. **Every answer comes from an explicit lookup table: one row per tag value, and the row *is* the rule.**
 
 The folder is self-contained: its own [`config.py`](config.py) (label vocabulary, worker densities, paths), tests and
-reference codelist. It reads the outputs of pipeline steps 01 and 04 and never imports the pipeline's root `config.py`.
+notebook. It reads the outputs of pipeline steps 01 and 04 and never imports the pipeline's root `config.py`.
 
 ## Running it
 
@@ -112,10 +112,9 @@ or no signal at all.*
   Unioning layers instead was rejected: `services` (2.31) would attach to nearly every POI building and, under the
   highest-weight rule, silently override real classes just below it, turning every `kindergartens` (2.30) into
   `services`.
-- **Keyed on the ALKIS code, never the English label.** `31001_3031` is *Schloss* (a palace) but carries the label
-  "Lock" in this folder's codelist copy
-  ([`reference/building_function_codelist.csv`](reference/building_function_codelist.csv)); the pipeline's table
-  (`data/reference/building_function_codelist_de_en.csv`) says "Castle". In both, 15 of 301 codes share an English
+- **Keyed on the ALKIS code, never the English label.** `31001_3031` is *Schloss* (a palace) but carried the label
+  "Lock" in an earlier codelist; the pipeline's table
+  (`data/reference/building_function_codelist_de_en.csv`) says "Castle". In it, 15 of 301 codes share an English
   label with another code. No rule reads translated text.
 - **`work` is added centrally, not per row.** A Bosserhoff class *is* a worker-density rating, so anything carrying one
   is by definition staffed. The tables describe only the visitor-facing purpose; `classify_building` adds `work` once.
@@ -210,8 +209,7 @@ python rules/rule_smoke_test.py                      # interactive: type field=v
 `classify_building()` on a sample of 30 real input rows shipped with the tests
 ([`tests/data/sample_condensed_buildings.parquet`](tests/data/sample_condensed_buildings.parquet), derived from
 OpenStreetMap (ODbL) and LGLN (CC BY 4.0) data), statically checks every rule table, and pins each deliberate
-decision: the ALKIS code table (exclusions, the *Schloss*/"Lock" mistranslation of the codelist copy in
-[`reference/`](reference/)), the land-use refinement, the `work` invariant, layer precedence including the
+decision: the ALKIS code table (exclusions, the *Schloss*/"Lock" mistranslation of an earlier codelist), the land-use refinement, the `work` invariant, layer precedence including the
 `kindergartens` vs `services` case, `;`-composite tag splitting, farm-building exclusions, multi-POI reconciliation,
 where `business` may and may not be claimed, the keys `leisure`, `healthcare`, `club` and `sport`, the key defaults and
 the shopping-centre count.

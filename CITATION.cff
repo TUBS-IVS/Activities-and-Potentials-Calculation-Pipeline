@@ -23,7 +23,7 @@ authors:
 repository-code: "https://github.com/TUBS-IVS/Activities-and-Potentials-Calculation-Pipeline"
 license: MIT
 version: "1.0.0"
-date-released: "2026-10-27"
+date-released: "2026-10-28"
 keywords:
   - building activity classification
   - activity potential estimation

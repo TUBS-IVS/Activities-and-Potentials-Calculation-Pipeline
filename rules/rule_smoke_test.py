@@ -6,20 +6,20 @@ sanity-check the rule tables before running the pipeline.
 Usage (from project root):
 
     # One-shot: pass tags as flags, see the prediction and which layer fired
-    python scripts/rule_smoke_test.py --amenity restaurant
-    python scripts/rule_smoke_test.py --shop bakery --shop kiosk
-    python scripts/rule_smoke_test.py --function 31001_2000
-    python scripts/rule_smoke_test.py --function 31001_2000 --osm_landuse_class industrial
-    python scripts/rule_smoke_test.py --building church --additional_information "religion: christian"
+    python rules/rule_smoke_test.py --amenity restaurant
+    python rules/rule_smoke_test.py --shop bakery --shop kiosk
+    python rules/rule_smoke_test.py --function 31001_2000
+    python rules/rule_smoke_test.py --function 31001_2000 --osm_landuse_class industrial
+    python rules/rule_smoke_test.py --building church --additional_information "religion: christian"
 
     # Inspect the ALKIS code table directly: every code, or one code, with its
     # German label and the answer it produces
-    python scripts/rule_smoke_test.py --alkis
-    python scripts/rule_smoke_test.py --alkis 31001_3031
+    python rules/rule_smoke_test.py --alkis
+    python rules/rule_smoke_test.py --alkis 31001_3031
 
     # Interactive REPL: type "field=value" lines, blank line to classify,
     # "reset" to clear, "quit" to exit
-    python scripts/rule_smoke_test.py
+    python rules/rule_smoke_test.py
 """
 
 import sys
@@ -54,7 +54,7 @@ def _german_labels():
     try:
         import pandas as pd
         from config import BUILDING_FUNCTION_CODELIST
-        cl = pd.read_csv(BUILDING_FUNCTION_CODELIST, encoding="utf-8",
+        cl = pd.read_csv(BUILDING_FUNCTION_CODELIST, encoding="utf-8-sig",
                          encoding_errors="replace")
         return dict(zip(cl["function"], cl["label_de"]))
     except Exception:
